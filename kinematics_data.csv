@@ -1,0 +1,6 @@
+Parameter,Value,Unit
+initial_velocity,55,1
+launch_angle,10,
+surface_area,.233,
+launch_height,27,
+gravity_constant,9.81,

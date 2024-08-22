@@ -1,0 +1,8 @@
+kinematics_path=C:/Users/jnbaney/Documents/cs capstone/SimuCADSuite/__pycache__
+fluid_dynamics_path=C:/Users/jnbaney/Documents/cs capstone/SimuCADSuite/assets
+audio_waveform_path=C:/Users/jnbaney/Desktop/code project
+CAD_path=C:/Users/jnbaney/Downloads/eMG-100-G60.stp
+velocity=10
+dark_mode=True
+multithreading=True
+gpu_rendering=False
