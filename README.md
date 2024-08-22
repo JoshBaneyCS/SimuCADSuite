@@ -1,5 +1,7 @@
 # SimuCADSuite
 
+![alt text](https://github.com/JoshBaneyCS/SimuCADSuite/blob/main/simucadsuitelogo.png?raw=true)
+
 SimuCADSuite is a comprehensive, modular simulation tool designed as an open-source physics simulation tool. The Program is made to fulfill the Undergraduate capstone for a BS- CS degree and to highlight scientific computing/ mathmatical analysis and computer science interests of the author. It combines the power of Python for complex computational tasks with the flexibility of Electron for a modern, interactive user interface. The suite includes modules for Fluid Dynamics Simulation, Kinematics Simulation, and Audio Decoding using Fast Fourier Transform and Discrete Fourier Transform (FFT and DFT), making it a versatile tool for a variety of engineering and scientific applications.
 
 ## Table of Contents
