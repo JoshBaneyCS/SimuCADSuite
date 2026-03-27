@@ -90,6 +90,47 @@ impl MeshLoader for GmshLoader {
 }
 
 // ---------------------------------------------------------------------------
+// StlLoader — STL ASCII and binary files
+// ---------------------------------------------------------------------------
+
+/// Loader for STL files (ASCII and binary).
+pub struct StlLoader;
+
+impl MeshLoader for StlLoader {
+    fn load(path: &Path) -> Result<Mesh, MeshError> {
+        info!("Loading STL mesh from {}", path.display());
+
+        let data = fs::read(path)?;
+        let format = crate::stl::detect_stl_format(&data);
+
+        let mesh = match format {
+            crate::stl::StlFormat::Ascii => {
+                let text = String::from_utf8(data).map_err(|e| {
+                    MeshError::ParseError(format!("STL file is not valid UTF-8: {e}"))
+                })?;
+                crate::stl::parse_stl_ascii(&text)?
+            }
+            crate::stl::StlFormat::Binary => crate::stl::parse_stl_binary(&data)?,
+        };
+
+        debug!(
+            "Parsed STL mesh: {} nodes, {} elements",
+            mesh.node_count(),
+            mesh.element_count(),
+        );
+
+        validate_mesh(&mesh)?;
+        info!("STL mesh validated successfully");
+
+        Ok(mesh)
+    }
+
+    fn save(mesh: &Mesh, path: &Path) -> Result<(), MeshError> {
+        crate::stl::write_stl_ascii(mesh, path)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
