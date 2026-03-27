@@ -13,6 +13,9 @@ use crate::home;
 use crate::kinematics_ui::KinematicsPanel;
 use crate::settings_ui;
 
+#[cfg(feature = "audio")]
+use crate::audio_ui::AudioPanel;
+
 // ---------------------------------------------------------------------------
 // Page enum
 // ---------------------------------------------------------------------------
@@ -24,6 +27,7 @@ pub enum Page {
     Kinematics,
     FluidDynamics,
     Calculator,
+    AudioAnalyzer,
     Settings,
 }
 
@@ -35,6 +39,7 @@ impl Page {
             Page::Kinematics => "Projectile Motion",
             Page::FluidDynamics => "Fluid Dynamics",
             Page::Calculator => "Scientific Calculator",
+            Page::AudioAnalyzer => "Audio Analyzer",
             Page::Settings => "Settings",
         }
     }
@@ -56,6 +61,9 @@ pub struct SimuApp {
     pub fluid_panel: FluidPanel,
     /// Calculator panel state.
     pub calculator_panel: CalculatorPanel,
+    /// Audio analyzer panel state.
+    #[cfg(feature = "audio")]
+    pub audio_panel: AudioPanel,
     /// Whether the settings dialog is open (as a floating window).
     pub settings_open: bool,
 }
@@ -70,6 +78,8 @@ impl SimuApp {
             kinematics_panel: KinematicsPanel::default(),
             fluid_panel: FluidPanel::default(),
             calculator_panel: CalculatorPanel::default(),
+            #[cfg(feature = "audio")]
+            audio_panel: AudioPanel::default(),
             settings_open: false,
         }
     }
@@ -111,12 +121,14 @@ impl eframe::App for SimuApp {
                 ui.with_layout(
                     egui::Layout::right_to_left(egui::Align::Center),
                     |ui| {
-                        let pages = [
+                        let mut pages = vec![
                             Page::Home,
                             Page::Kinematics,
                             Page::FluidDynamics,
                             Page::Calculator,
                         ];
+                        #[cfg(feature = "audio")]
+                        pages.push(Page::AudioAnalyzer);
                         for page in pages.iter().rev() {
                             let label = page.label();
                             let is_current = *page == self.current_page;
@@ -189,6 +201,12 @@ impl eframe::App for SimuApp {
                 }
                 Page::Calculator => {
                     self.calculator_panel.show(ui);
+                }
+                Page::AudioAnalyzer => {
+                    #[cfg(feature = "audio")]
+                    self.audio_panel.show(ui);
+                    #[cfg(not(feature = "audio"))]
+                    ui.label("Audio feature not enabled. Rebuild with --features audio.");
                 }
                 Page::Settings => {
                     settings_ui::show_settings(ui, &mut self.settings);

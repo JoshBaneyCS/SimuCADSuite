@@ -55,7 +55,7 @@ pub fn show_home(ui: &mut Ui) -> Option<Page> {
         tiles.push((
             "Audio Analyzer",
             "Load audio files, visualize waveforms,\nand perform spectral analysis with\nreal-time playback.",
-            Page::Home, // Placeholder — no audio page yet.
+            Page::AudioAnalyzer,
         ));
     }
 
