@@ -1,0 +1,80 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+default-members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Josh Baney"]
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Math / linear algebra
+nalgebra = "0.33"
+
+# Parallelism
+rayon = "1.10"
+
+# GPU compute
+wgpu = "24"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"
+
+# Parsing
+nom = "7"
+
+# GUI
+eframe = "0.30"
+egui = "0.30"
+egui_plot = "0.30"
+
+# Audio / DSP
+rustfft = "6"
+symphonia = { version = "0.5", features = ["mp3", "wav", "flac"] }
+
+# Data I/O
+csv = "1"
+rust_xlsxwriter = "0.80"
+
+# Testing / benchmarks
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[package]
+name = "simucadsuite"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+simucad-core = { path = "crates/core" }
+simucad-gui = { path = "crates/gui" }
+simucad-gpu = { path = "crates/gpu", optional = true }
+eframe.workspace = true
+egui.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+pollster.workspace = true
+anyhow.workspace = true
+
+[features]
+default = ["gpu", "cas", "audio"]
+gpu = ["dep:simucad-gpu", "simucad-gui/gpu"]
+cas = ["simucad-gui/cas"]
+audio = ["simucad-gui/audio"]
+cuda = ["simucad-gpu/cuda"]
+dev-tools = ["simucad-gui/dev-tools"]

@@ -1,0 +1,21 @@
+[package]
+name = "simucad-gpu"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "GPU compute abstraction: wgpu backend, CPU fallback, compute shaders"
+
+[dependencies]
+simucad-core = { path = "../core" }
+wgpu.workspace = true
+bytemuck.workspace = true
+pollster.workspace = true
+rayon.workspace = true
+tracing.workspace = true
+
+[features]
+default = []
+cuda = []
+
+[dev-dependencies]

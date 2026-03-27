@@ -1,0 +1,35 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# Cargo lock for libraries (keep for binary)
+# Cargo.lock is kept for reproducible builds
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Build artifacts
+*.so
+*.dylib
+*.dll
+
+# Profiling
+*.profraw
+perf.data
+flamegraph.svg
+
+# Legacy Python reference (not part of Rust project)
+SimuCADSuite-JoshBaneyCS-0.0.2/
+SimuCADSuite-JoshBaneyCS-0.0.2.zip

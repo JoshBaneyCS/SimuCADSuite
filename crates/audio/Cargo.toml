@@ -1,0 +1,16 @@
+[package]
+name = "simucad-audio"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Audio analysis: FFT/DFT pipeline, audio file decoding, spectral data"
+
+[dependencies]
+simucad-core = { path = "../core" }
+rustfft.workspace = true
+symphonia.workspace = true
+tracing.workspace = true
+serde.workspace = true
+
+[dev-dependencies]

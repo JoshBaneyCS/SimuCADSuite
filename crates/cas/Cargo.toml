@@ -1,0 +1,13 @@
+[package]
+name = "simucad-cas"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Computer Algebra System: expression parsing, evaluation, symbolic differentiation"
+
+[dependencies]
+simucad-core = { path = "../core" }
+tracing.workspace = true
+
+[dev-dependencies]

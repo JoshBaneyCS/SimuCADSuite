@@ -1,0 +1,15 @@
+[package]
+name = "simucad-mesh"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Mesh types, .msh file parsing, validation, and I/O for SimuCADSuite"
+
+[dependencies]
+simucad-core = { path = "../core" }
+nom.workspace = true
+tracing.workspace = true
+serde.workspace = true
+
+[dev-dependencies]

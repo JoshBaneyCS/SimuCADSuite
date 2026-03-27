@@ -1,0 +1,20 @@
+[package]
+name = "simucad-physics"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Physics engines: kinematics, fluid dynamics, integrators, and trajectory analysis"
+
+[dependencies]
+simucad-core = { path = "../core" }
+rayon.workspace = true
+nalgebra.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "particle_bench"
+harness = false

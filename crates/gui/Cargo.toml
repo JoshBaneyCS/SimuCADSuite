@@ -1,0 +1,29 @@
+[package]
+name = "simucad-gui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Desktop GUI: egui/eframe application shell, pages, plotting, task coordination"
+
+[dependencies]
+simucad-core = { path = "../core" }
+simucad-physics = { path = "../physics" }
+simucad-mesh = { path = "../mesh" }
+simucad-cas = { path = "../cas", optional = true }
+simucad-gpu = { path = "../gpu", optional = true }
+simucad-audio = { path = "../audio", optional = true }
+eframe.workspace = true
+egui.workspace = true
+egui_plot.workspace = true
+tracing.workspace = true
+serde.workspace = true
+
+[features]
+default = []
+gpu = ["dep:simucad-gpu"]
+cas = ["dep:simucad-cas"]
+audio = ["dep:simucad-audio"]
+dev-tools = []
+
+[dev-dependencies]
