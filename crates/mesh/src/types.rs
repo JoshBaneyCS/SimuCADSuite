@@ -128,6 +128,38 @@ impl Mesh {
     }
 }
 
+impl MeshElement {
+    /// Compute the centroid (geometric centre) of this element.
+    pub fn element_centroid(&self, nodes: &[Vec3]) -> Vec3 {
+        let n = self.node_indices.len() as f64;
+        let mut sum = Vec3::ZERO;
+        for &idx in &self.node_indices {
+            let v = nodes[idx];
+            sum = sum + v;
+        }
+        sum * (1.0 / n)
+    }
+
+    /// Compute the axis-aligned bounding box enclosing this element.
+    pub fn element_bounding_box(&self, nodes: &[Vec3]) -> BoundingBox3 {
+        let first = nodes[self.node_indices[0]];
+        let mut min = first;
+        let mut max = first;
+
+        for &idx in &self.node_indices[1..] {
+            let v = nodes[idx];
+            if v.x < min.x { min.x = v.x; }
+            if v.y < min.y { min.y = v.y; }
+            if v.z < min.z { min.z = v.z; }
+            if v.x > max.x { max.x = v.x; }
+            if v.y > max.y { max.y = v.y; }
+            if v.z > max.z { max.z = v.z; }
+        }
+
+        BoundingBox3::new(min, max)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -209,5 +241,38 @@ mod tests {
         let bb = mesh.bounding_box();
         assert_eq!(bb.min, Vec3::ZERO);
         assert_eq!(bb.max, Vec3::ZERO);
+    }
+
+    #[test]
+    fn element_centroid_triangle() {
+        let nodes = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(3.0, 0.0, 0.0),
+            Vec3::new(0.0, 3.0, 0.0),
+        ];
+        let elem = MeshElement {
+            element_type: ElementType::Triangle3,
+            node_indices: vec![0, 1, 2],
+        };
+        let c = elem.element_centroid(&nodes);
+        assert!((c.x - 1.0).abs() < 1e-12);
+        assert!((c.y - 1.0).abs() < 1e-12);
+        assert!((c.z - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn element_bounding_box_triangle() {
+        let nodes = vec![
+            Vec3::new(1.0, 2.0, 3.0),
+            Vec3::new(4.0, 0.0, 1.0),
+            Vec3::new(2.0, 5.0, 0.0),
+        ];
+        let elem = MeshElement {
+            element_type: ElementType::Triangle3,
+            node_indices: vec![0, 1, 2],
+        };
+        let bb = elem.element_bounding_box(&nodes);
+        assert_eq!(bb.min, Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(bb.max, Vec3::new(4.0, 5.0, 3.0));
     }
 }
