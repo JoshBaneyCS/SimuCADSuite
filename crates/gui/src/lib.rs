@@ -1,4 +1,6 @@
 pub mod app;
+#[cfg(feature = "audio")]
+pub mod audio_ui;
 pub mod calculator_ui;
 pub mod fluid_ui;
 pub mod home;
