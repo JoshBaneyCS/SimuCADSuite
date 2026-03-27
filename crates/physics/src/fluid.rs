@@ -335,30 +335,35 @@ impl ParticleSystem {
         grid: &SpatialHashGrid,
     ) -> Vec<Vec3> {
         let n = mesh_nodes.len();
-        // Accumulators per node: (sum_of_velocities, count_of_contributing_elements)
+
+        // Phase 1: compute per-element velocities in parallel
+        let elem_vels: Vec<Vec3> = mesh_elements
+            .par_iter()
+            .map(|elem_nodes| {
+                let centroid = element_centroid(mesh_nodes, elem_nodes);
+                let radius = element_bounding_radius(mesh_nodes, elem_nodes, centroid);
+                let search_radius = if radius < grid.cell_size { grid.cell_size } else { radius };
+                let nearby = grid.query_radius(centroid, search_radius);
+
+                if nearby.is_empty() {
+                    Vec3::ZERO
+                } else {
+                    let mut sum = Vec3::ZERO;
+                    for &pi in &nearby {
+                        sum = sum + (self.particles[pi].position - centroid);
+                    }
+                    sum * (1.0 / nearby.len() as f64)
+                }
+            })
+            .collect();
+
+        // Phase 2: scatter to nodes (sequential — cheap O(E * nodes_per_elem))
         let mut vel_sum = vec![Vec3::ZERO; n];
         let mut vel_count = vec![0u32; n];
 
-        for elem_nodes in mesh_elements {
-            let centroid = element_centroid(mesh_nodes, elem_nodes);
-            let radius = element_bounding_radius(mesh_nodes, elem_nodes, centroid);
-            // Ensure a minimum search radius so we always pick up nearby particles.
-            let search_radius = if radius < grid.cell_size { grid.cell_size } else { radius };
-
-            let nearby = grid.query_radius(centroid, search_radius);
-
-            let elem_vel = if nearby.is_empty() {
-                Vec3::ZERO
-            } else {
-                let mut sum = Vec3::ZERO;
-                for &pi in &nearby {
-                    sum = sum + (self.particles[pi].position - centroid);
-                }
-                sum * (1.0 / nearby.len() as f64)
-            };
-
+        for (elem_nodes, elem_vel) in mesh_elements.iter().zip(elem_vels.iter()) {
             for &ni in elem_nodes {
-                vel_sum[ni] = vel_sum[ni] + elem_vel;
+                vel_sum[ni] = vel_sum[ni] + *elem_vel;
                 vel_count[ni] += 1;
             }
         }

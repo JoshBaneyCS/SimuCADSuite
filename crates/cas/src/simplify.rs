@@ -6,13 +6,14 @@ use crate::ast::{BinOp, Expr, UnaryOp};
 /// change between iterations).
 pub fn simplify(expr: &Expr) -> Expr {
     let mut current = expr.clone();
-    loop {
+    for _ in 0..100 {
         let next = simplify_once(&current);
         if next == current {
-            return next;
+            return current; // return the already-owned value, no extra clone
         }
         current = next;
     }
+    current
 }
 
 /// A single simplification pass.

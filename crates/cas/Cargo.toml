@@ -11,3 +11,8 @@ simucad-core = { path = "../core" }
 tracing.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "cas_bench"
+harness = false
