@@ -1,10 +1,12 @@
 use bytemuck::{Pod, Zeroable};
 use simucad_core::error::GpuError;
 use simucad_core::types::{Particle, Vec3};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::backend::ComputeBackend;
+use crate::capabilities::GpuCapabilities;
 use crate::pipeline;
+use crate::profiler::GpuProfiler;
 
 // ---------------------------------------------------------------------------
 // GPU-compatible data types (f32, 16-byte aligned)
@@ -102,6 +104,8 @@ struct VelocityFieldUniforms {
 pub struct WgpuBackend {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    capabilities: GpuCapabilities,
+    profiler: GpuProfiler,
 }
 
 impl WgpuBackend {
@@ -126,10 +130,17 @@ impl WgpuBackend {
 
         debug!("wgpu adapter: {:?}", adapter.get_info());
 
+        // Request timestamp query feature if available, otherwise proceed without.
+        let adapter_features = adapter.features();
+        let mut required_features = wgpu::Features::empty();
+        if adapter_features.contains(wgpu::Features::TIMESTAMP_QUERY) {
+            required_features |= wgpu::Features::TIMESTAMP_QUERY;
+        }
+
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("simucad_compute_device"),
-                required_features: wgpu::Features::empty(),
+                required_features,
                 required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::Performance,
             },
@@ -137,7 +148,23 @@ impl WgpuBackend {
         ))
         .map_err(|e| GpuError::DeviceCreation(e.to_string()))?;
 
-        Ok(Self { device, queue })
+        let capabilities = GpuCapabilities::detect(&adapter, &device);
+        info!("GPU capabilities detected:\n{capabilities}");
+
+        // Enable profiling by default -- it no-ops if timestamps are unsupported.
+        let profiler = GpuProfiler::new(&device, &queue, true);
+
+        Ok(Self {
+            device,
+            queue,
+            capabilities,
+            profiler,
+        })
+    }
+
+    /// Access the detected GPU capabilities.
+    pub fn capabilities(&self) -> &GpuCapabilities {
+        &self.capabilities
     }
 }
 
@@ -197,13 +224,16 @@ impl ComputeBackend for WgpuBackend {
             ],
         });
 
-        // Dispatch
-        let workgroup_count = ((num_particles as u32) + 255) / 256;
+        // Dispatch -- use recommended workgroup size (shader compiled with 256)
+        let wg_size = self.capabilities.recommend_workgroup_size(num_particles);
+        let workgroup_count = ((num_particles as u32) + wg_size - 1) / wg_size;
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("advect_encoder"),
             });
+
+        self.profiler.write_start_timestamp(&mut encoder);
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("advect_pass"),
@@ -213,7 +243,13 @@ impl ComputeBackend for WgpuBackend {
             pass.set_bind_group(0, &bind_group, &[]);
             pass.dispatch_workgroups(workgroup_count, 1, 1);
         }
+        self.profiler.write_end_timestamp(&mut encoder);
+        self.profiler.resolve(&mut encoder);
         self.queue.submit(std::iter::once(encoder.finish()));
+
+        if let Some(ms) = self.profiler.read_elapsed_ms(&self.device, &self.queue) {
+            debug!("advect_particles GPU time: {ms:.3} ms ({num_particles} particles)");
+        }
 
         // Read back
         let result: Vec<GpuParticle> =
@@ -308,6 +344,8 @@ impl ComputeBackend for WgpuBackend {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("vf_encoder"),
             });
+
+        self.profiler.write_start_timestamp(&mut encoder);
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("vf_pass"),
@@ -317,7 +355,15 @@ impl ComputeBackend for WgpuBackend {
             pass.set_bind_group(0, &bind_group, &[]);
             pass.dispatch_workgroups(num_nodes as u32, 1, 1);
         }
+        self.profiler.write_end_timestamp(&mut encoder);
+        self.profiler.resolve(&mut encoder);
         self.queue.submit(std::iter::once(encoder.finish()));
+
+        if let Some(ms) = self.profiler.read_elapsed_ms(&self.device, &self.queue) {
+            debug!(
+                "compute_velocity_field GPU time: {ms:.3} ms ({num_nodes} nodes, {num_particles} particles)"
+            );
+        }
 
         // Read back
         let result: Vec<GpuVec3> =

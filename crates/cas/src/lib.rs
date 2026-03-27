@@ -1,6 +1,9 @@
 pub mod ast;
 pub mod derivative;
 pub mod evaluator;
+pub mod integration;
+pub mod latex;
 pub mod parser;
 pub mod plotter;
 pub mod simplify;
+pub mod solver;

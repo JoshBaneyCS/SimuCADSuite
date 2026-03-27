@@ -58,6 +58,10 @@ fn simplify_once(expr: &Expr) -> Expr {
                     if l.is_zero() {
                         return r;
                     }
+                    // Combine like terms: a*x + b*x = (a+b)*x
+                    if let Some(result) = try_combine_like_terms(&l, &r, true) {
+                        return result;
+                    }
                     Expr::add(l, r)
                 }
                 BinOp::Sub => {
@@ -72,6 +76,10 @@ fn simplify_once(expr: &Expr) -> Expr {
                     // x - x = 0
                     if l == r {
                         return Expr::num(0.0);
+                    }
+                    // Combine like terms: a*x - b*x = (a-b)*x
+                    if let Some(result) = try_combine_like_terms(&l, &r, false) {
+                        return result;
                     }
                     Expr::sub(l, r)
                 }
@@ -88,6 +96,16 @@ fn simplify_once(expr: &Expr) -> Expr {
                     if l.is_one() {
                         return r;
                     }
+                    // (-a) * (-b) = a * b
+                    if let (
+                        Expr::UnaryOp { op: UnaryOp::Neg, operand: a },
+                        Expr::UnaryOp { op: UnaryOp::Neg, operand: b },
+                    ) = (&l, &r)
+                    {
+                        return Expr::mul(a.as_ref().clone(), b.as_ref().clone());
+                    }
+                    // Combine like terms: (a * x) + (b * x) is handled in Add,
+                    // but here handle Num * Num * Var consolidation if needed
                     Expr::mul(l, r)
                 }
                 BinOp::Div => {
@@ -129,11 +147,90 @@ fn simplify_once(expr: &Expr) -> Expr {
 
         Expr::Func { name, args } => {
             let simplified_args: Vec<Expr> = args.iter().map(simplify_once).collect();
+
+            // Trigonometric simplifications for single-argument functions
+            if simplified_args.len() == 1 {
+                let arg = &simplified_args[0];
+                match name.as_str() {
+                    "sin" => {
+                        // sin(0) = 0
+                        if arg.is_zero() {
+                            return Expr::num(0.0);
+                        }
+                        // sin(pi) = 0
+                        if *arg == Expr::var("pi") {
+                            return Expr::num(0.0);
+                        }
+                    }
+                    "cos" => {
+                        // cos(0) = 1
+                        if arg.is_zero() {
+                            return Expr::num(1.0);
+                        }
+                        // cos(pi) = -1
+                        if *arg == Expr::var("pi") {
+                            return Expr::num(-1.0);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
             Expr::Func {
                 name: name.clone(),
                 args: simplified_args,
             }
         }
+    }
+}
+
+/// Extract the coefficient and variable from a term that looks like `Num * Expr`
+/// or just `Expr` (coefficient = 1).
+fn extract_coeff_and_term(expr: &Expr) -> Option<(f64, &Expr)> {
+    match expr {
+        Expr::BinOp {
+            op: BinOp::Mul,
+            lhs,
+            rhs,
+        } => {
+            if let Expr::Num(c) = lhs.as_ref() {
+                Some((*c, rhs.as_ref()))
+            } else if let Expr::Num(c) = rhs.as_ref() {
+                Some((*c, lhs.as_ref()))
+            } else {
+                None
+            }
+        }
+        _ => Some((1.0, expr)),
+    }
+}
+
+/// Try to combine like terms: `a*x + b*x = (a+b)*x` or `a*x - b*x = (a-b)*x`.
+/// `is_add` indicates whether this is addition (true) or subtraction (false).
+fn try_combine_like_terms(l: &Expr, r: &Expr, is_add: bool) -> Option<Expr> {
+    let (cl, tl) = extract_coeff_and_term(l)?;
+    let (cr, tr) = extract_coeff_and_term(r)?;
+
+    // Terms must match (e.g., both are `x` or `sin(x)`)
+    if tl != tr {
+        return None;
+    }
+
+    // Don't combine plain numbers — that's handled by constant folding
+    if matches!(tl, Expr::Num(_)) {
+        return None;
+    }
+
+    let combined = if is_add { cl + cr } else { cl - cr };
+
+    if combined == 0.0 {
+        Some(Expr::num(0.0))
+    } else if combined == 1.0 {
+        Some(tl.clone())
+    } else if combined == -1.0 {
+        Some(Expr::neg(tl.clone()))
+    } else {
+        Some(Expr::mul(Expr::num(combined), tl.clone()))
     }
 }
 
@@ -316,5 +413,78 @@ mod tests {
         // 1 / 0 should stay as-is (not fold to Inf)
         let e = Expr::div(Expr::num(1.0), Expr::num(0.0));
         assert_eq!(simplify(&e), Expr::div(Expr::num(1.0), Expr::num(0.0)));
+    }
+
+    // --- New simplification rules ---
+
+    #[test]
+    fn test_simplify_double_neg_in_mul() {
+        // (-a) * (-b) = a * b
+        let e = Expr::mul(Expr::neg(Expr::var("a")), Expr::neg(Expr::var("b")));
+        assert_eq!(simplify(&e), Expr::mul(Expr::var("a"), Expr::var("b")));
+    }
+
+    #[test]
+    fn test_simplify_combine_like_terms_add() {
+        // 2*x + 3*x = 5*x
+        let e = Expr::add(
+            Expr::mul(Expr::num(2.0), Expr::var("x")),
+            Expr::mul(Expr::num(3.0), Expr::var("x")),
+        );
+        assert_eq!(simplify(&e), Expr::mul(Expr::num(5.0), Expr::var("x")));
+    }
+
+    #[test]
+    fn test_simplify_combine_like_terms_sub() {
+        // 5*x - 3*x = 2*x
+        let e = Expr::sub(
+            Expr::mul(Expr::num(5.0), Expr::var("x")),
+            Expr::mul(Expr::num(3.0), Expr::var("x")),
+        );
+        assert_eq!(simplify(&e), Expr::mul(Expr::num(2.0), Expr::var("x")));
+    }
+
+    #[test]
+    fn test_simplify_combine_like_terms_cancel() {
+        // 3*x - 3*x = 0
+        let e = Expr::sub(
+            Expr::mul(Expr::num(3.0), Expr::var("x")),
+            Expr::mul(Expr::num(3.0), Expr::var("x")),
+        );
+        assert_eq!(simplify(&e), Expr::num(0.0));
+    }
+
+    #[test]
+    fn test_simplify_combine_like_terms_implicit_coeff() {
+        // x + 3*x = 4*x (x has implicit coefficient 1)
+        let e = Expr::add(
+            Expr::var("x"),
+            Expr::mul(Expr::num(3.0), Expr::var("x")),
+        );
+        assert_eq!(simplify(&e), Expr::mul(Expr::num(4.0), Expr::var("x")));
+    }
+
+    #[test]
+    fn test_simplify_sin_zero() {
+        let e = Expr::func("sin", vec![Expr::num(0.0)]);
+        assert_eq!(simplify(&e), Expr::num(0.0));
+    }
+
+    #[test]
+    fn test_simplify_cos_zero() {
+        let e = Expr::func("cos", vec![Expr::num(0.0)]);
+        assert_eq!(simplify(&e), Expr::num(1.0));
+    }
+
+    #[test]
+    fn test_simplify_sin_pi() {
+        let e = Expr::func("sin", vec![Expr::var("pi")]);
+        assert_eq!(simplify(&e), Expr::num(0.0));
+    }
+
+    #[test]
+    fn test_simplify_cos_pi() {
+        let e = Expr::func("cos", vec![Expr::var("pi")]);
+        assert_eq!(simplify(&e), Expr::num(-1.0));
     }
 }
