@@ -1,50 +1,56 @@
 //! Scientific plotting wrappers around `egui_plot`.
 //!
 //! Provides convenience functions for drawing trajectories, 2D function
-//! curves, and vector fields inside an egui UI.
+//! curves, vector fields, and sampled scatter plots inside an egui UI.
 
 use egui::Ui;
-use egui_plot::{Line, Plot, PlotPoints, Arrows};
-use simucad_core::types::{Trajectory, Vec2};
+use egui_plot::{Arrows, Line, Plot, PlotPoints, Points, Legend};
+use simucad_core::types::{Trajectory, TrajectoryPoint, Vec2};
 
 // ---------------------------------------------------------------------------
 // Trajectory plotting
 // ---------------------------------------------------------------------------
 
-/// Plot vacuum and drag trajectories on the same axes.
+/// Plot vacuum and/or drag trajectories on the same axes.
 ///
-/// The vacuum trajectory is drawn as a blue line and the drag trajectory as
-/// a red line. Axes are labelled with distance in metres.
-pub fn plot_trajectories(ui: &mut Ui, vacuum: &Trajectory, drag: &Trajectory) {
-    let vacuum_points: PlotPoints = vacuum
-        .points
-        .iter()
-        .map(|p| [p.position.x, p.position.y])
-        .collect();
-
-    let drag_points: PlotPoints = drag
-        .points
-        .iter()
-        .map(|p| [p.position.x, p.position.y])
-        .collect();
-
-    let vacuum_line = Line::new(vacuum_points)
-        .name("Vacuum")
-        .color(egui::Color32::from_rgb(80, 140, 255));
-
-    let drag_line = Line::new(drag_points)
-        .name("With Drag")
-        .color(egui::Color32::from_rgb(255, 100, 80));
-
+/// Either trajectory may be `None`; at least one should be `Some` for a
+/// meaningful plot. The vacuum trajectory is drawn as a blue line and the
+/// drag trajectory as a red line. Axes are labelled with distance in metres.
+pub fn plot_trajectories(
+    ui: &mut Ui,
+    vacuum: Option<&Trajectory>,
+    drag: Option<&Trajectory>,
+) {
     Plot::new("trajectory_plot")
-        .legend(egui_plot::Legend::default())
+        .legend(Legend::default())
         .x_axis_label("Horizontal Distance (m)")
         .y_axis_label("Height (m)")
         .height(300.0)
         .data_aspect(1.0)
         .show(ui, |plot_ui| {
-            plot_ui.line(vacuum_line);
-            plot_ui.line(drag_line);
+            if let Some(vac) = vacuum {
+                let points: PlotPoints = vac
+                    .points
+                    .iter()
+                    .map(|p| [p.position.x, p.position.y])
+                    .collect();
+                let line = Line::new(points)
+                    .name("Vacuum")
+                    .color(egui::Color32::from_rgb(80, 140, 255));
+                plot_ui.line(line);
+            }
+
+            if let Some(drg) = drag {
+                let points: PlotPoints = drg
+                    .points
+                    .iter()
+                    .map(|p| [p.position.x, p.position.y])
+                    .collect();
+                let line = Line::new(points)
+                    .name("With Drag")
+                    .color(egui::Color32::from_rgb(255, 100, 80));
+                plot_ui.line(line);
+            }
         });
 }
 
@@ -61,12 +67,72 @@ pub fn plot_function_2d(ui: &mut Ui, points: &[(f64, f64)], label: &str) {
         .color(egui::Color32::from_rgb(100, 200, 100));
 
     Plot::new("function_plot")
-        .legend(egui_plot::Legend::default())
+        .legend(Legend::default())
         .x_axis_label("x")
         .y_axis_label("f(x)")
         .height(300.0)
         .show(ui, |plot_ui| {
             plot_ui.line(line);
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Sampled trajectory points — scatter plot with velocity vectors
+// ---------------------------------------------------------------------------
+
+/// Plot sampled trajectory points as a scatter with tiny velocity arrows.
+pub fn plot_sampled_points(ui: &mut Ui, points: &[TrajectoryPoint]) {
+    if points.is_empty() {
+        ui.label("(no sampled points)");
+        return;
+    }
+
+    let positions: PlotPoints = points
+        .iter()
+        .map(|p| [p.position.x, p.position.y])
+        .collect();
+
+    let scatter = Points::new(positions)
+        .name("Sample Points")
+        .radius(4.0)
+        .color(egui::Color32::from_rgb(255, 200, 50));
+
+    // Velocity arrows — scale so they are visible but not overwhelming.
+    let max_speed = points
+        .iter()
+        .map(|p| p.speed)
+        .fold(0.0_f64, f64::max);
+
+    let arrow_scale = if max_speed > f64::EPSILON {
+        // Make longest arrow roughly 5% of the trajectory range.
+        let x_range = points.last().map(|p| p.position.x).unwrap_or(1.0);
+        (x_range * 0.05) / max_speed
+    } else {
+        1.0
+    };
+
+    let origins: Vec<[f64; 2]> = points.iter().map(|p| [p.position.x, p.position.y]).collect();
+    let vectors: Vec<[f64; 2]> = points
+        .iter()
+        .map(|p| [p.velocity.x * arrow_scale, p.velocity.y * arrow_scale])
+        .collect();
+
+    let arrows = Arrows::new(
+        origins.into_iter().collect::<PlotPoints>(),
+        vectors.into_iter().collect::<PlotPoints>(),
+    )
+    .name("Velocity")
+    .color(egui::Color32::from_rgb(150, 150, 255));
+
+    Plot::new("sampled_points_plot")
+        .legend(Legend::default())
+        .x_axis_label("x (m)")
+        .y_axis_label("y (m)")
+        .height(250.0)
+        .data_aspect(1.0)
+        .show(ui, |plot_ui| {
+            plot_ui.points(scatter);
+            plot_ui.arrows(arrows);
         });
 }
 
@@ -103,8 +169,6 @@ pub fn plot_vector_field(ui: &mut Ui, positions: &[Vec2], velocities: &[Vec2]) {
     };
 
     let origins: Vec<[f64; 2]> = positions.iter().map(|p| [p.x, p.y]).collect();
-    // egui_plot::Arrows expects (origins, vectors) where vectors are the
-    // direction offsets from each origin, not absolute tip positions.
     let vectors: Vec<[f64; 2]> = velocities
         .iter()
         .map(|v| [v.x * scale, v.y * scale])
@@ -118,7 +182,7 @@ pub fn plot_vector_field(ui: &mut Ui, positions: &[Vec2], velocities: &[Vec2]) {
     .color(egui::Color32::from_rgb(200, 200, 50));
 
     Plot::new("vector_field_plot")
-        .legend(egui_plot::Legend::default())
+        .legend(Legend::default())
         .x_axis_label("x (m)")
         .y_axis_label("y (m)")
         .height(300.0)

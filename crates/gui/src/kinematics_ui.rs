@@ -1,11 +1,15 @@
 //! Projectile motion (kinematics) UI panel.
 //!
 //! Provides input fields for launch parameters and displays both vacuum and
-//! drag trajectories using the physics crate solvers.
+//! drag trajectories using the physics crate solvers. Results include plots,
+//! summary statistics, sampled-point tables, and CSV export.
 
 use egui::Ui;
-use simucad_core::types::Trajectory;
+use simucad_core::export::{trajectory_to_table, DataTable};
+use simucad_core::types::{SimulationConfig, Trajectory, TrajectoryPoint};
 use simucad_physics::drag::{DragModel, DragShape};
+use simucad_physics::kinematics;
+use simucad_physics::trajectory::sample_trajectory;
 
 use crate::plotting;
 
@@ -34,8 +38,16 @@ pub struct KinematicsPanel {
     pub vacuum_trajectory: Option<Trajectory>,
     /// Computed drag trajectory (filled on "Calculate").
     pub drag_trajectory: Option<Trajectory>,
+    /// Sampled points from vacuum trajectory.
+    pub vacuum_samples: Vec<TrajectoryPoint>,
+    /// Sampled points from drag trajectory.
+    pub drag_samples: Vec<TrajectoryPoint>,
     /// Error message from the last calculation attempt.
     pub error_message: Option<String>,
+    /// CSV export text area content.
+    pub csv_output: String,
+    /// Whether the CSV output area is visible.
+    pub show_csv: bool,
 }
 
 impl Default for KinematicsPanel {
@@ -50,7 +62,11 @@ impl Default for KinematicsPanel {
             drag_shape: DragShape::Sphere,
             vacuum_trajectory: None,
             drag_trajectory: None,
+            vacuum_samples: Vec::new(),
+            drag_samples: Vec::new(),
             error_message: None,
+            csv_output: String::new(),
+            show_csv: false,
         }
     }
 }
@@ -137,32 +153,80 @@ impl KinematicsPanel {
 
         ui.add_space(12.0);
 
-        if ui.button("Calculate").clicked() {
-            self.calculate();
-        }
+        ui.horizontal(|ui| {
+            if ui.button("Calculate").clicked() {
+                self.calculate();
+            }
+
+            if self.vacuum_trajectory.is_some() || self.drag_trajectory.is_some() {
+                if ui.button("Export CSV").clicked() {
+                    self.export_csv();
+                }
+            }
+        });
 
         if let Some(ref err) = self.error_message {
             ui.add_space(4.0);
             ui.colored_label(egui::Color32::RED, err);
         }
-    }
 
-    /// Render the trajectory results (plot and table).
-    fn show_results(&mut self, ui: &mut Ui) {
-        match (&self.vacuum_trajectory, &self.drag_trajectory) {
-            (Some(vacuum), Some(drag)) => {
-                plotting::plot_trajectories(ui, vacuum, drag);
-                ui.add_space(12.0);
-                self.show_summary_table(ui, vacuum, drag);
-            }
-            _ => {
-                ui.label("Enter parameters and click Calculate to see results.");
-            }
+        // CSV output area.
+        if self.show_csv && !self.csv_output.is_empty() {
+            ui.add_space(8.0);
+            ui.collapsing("CSV Output", |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(200.0)
+                    .show(ui, |ui| {
+                        ui.monospace(&self.csv_output);
+                    });
+            });
         }
     }
 
-    /// Display a summary comparison table.
-    fn show_summary_table(&self, ui: &mut Ui, vacuum: &Trajectory, drag: &Trajectory) {
+    /// Render the trajectory results (plot, summary, sampled points).
+    fn show_results(&mut self, ui: &mut Ui) {
+        if self.vacuum_trajectory.is_none() && self.drag_trajectory.is_none() {
+            ui.label("Enter parameters and click Calculate to see results.");
+            return;
+        }
+
+        // Plot both trajectories.
+        plotting::plot_trajectories(
+            ui,
+            self.vacuum_trajectory.as_ref(),
+            self.drag_trajectory.as_ref(),
+        );
+
+        ui.add_space(12.0);
+
+        // Summary comparison table.
+        self.show_summary_table(ui);
+
+        // Sampled points scatter plot.
+        if !self.vacuum_samples.is_empty() {
+            ui.add_space(8.0);
+            ui.collapsing("Sampled Points Plot (Vacuum)", |ui| {
+                plotting::plot_sampled_points(ui, &self.vacuum_samples);
+            });
+        }
+
+        // Sampled points tables.
+        if let Some(ref vac) = self.vacuum_trajectory {
+            ui.add_space(4.0);
+            ui.collapsing("Sampled Points Table (Vacuum)", |ui| {
+                Self::show_points_table(ui, vac, "vacuum_pts");
+            });
+        }
+
+        if let Some(ref drg) = self.drag_trajectory {
+            ui.collapsing("Sampled Points Table (Drag)", |ui| {
+                Self::show_points_table(ui, drg, "drag_pts");
+            });
+        }
+    }
+
+    /// Display the summary comparison table.
+    fn show_summary_table(&self, ui: &mut Ui) {
         egui::Grid::new("trajectory_summary")
             .num_columns(3)
             .striped(true)
@@ -173,31 +237,24 @@ impl KinematicsPanel {
                 ui.strong("With Drag");
                 ui.end_row();
 
+                let vac = self.vacuum_trajectory.as_ref();
+                let drg = self.drag_trajectory.as_ref();
+
                 ui.label("Range (m)");
-                ui.label(format!("{:.2}", vacuum.range));
-                ui.label(format!("{:.2}", drag.range));
+                ui.label(vac.map_or("--".to_string(), |t| format!("{:.2}", t.range)));
+                ui.label(drg.map_or("--".to_string(), |t| format!("{:.2}", t.range)));
                 ui.end_row();
 
                 ui.label("Max Height (m)");
-                ui.label(format!("{:.2}", vacuum.max_height));
-                ui.label(format!("{:.2}", drag.max_height));
+                ui.label(vac.map_or("--".to_string(), |t| format!("{:.2}", t.max_height)));
+                ui.label(drg.map_or("--".to_string(), |t| format!("{:.2}", t.max_height)));
                 ui.end_row();
 
                 ui.label("Flight Time (s)");
-                ui.label(format!("{:.3}", vacuum.flight_time));
-                ui.label(format!("{:.3}", drag.flight_time));
+                ui.label(vac.map_or("--".to_string(), |t| format!("{:.3}", t.flight_time)));
+                ui.label(drg.map_or("--".to_string(), |t| format!("{:.3}", t.flight_time)));
                 ui.end_row();
             });
-
-        // Show sampled points from the vacuum trajectory.
-        ui.add_space(8.0);
-        ui.collapsing("Sampled Points (Vacuum)", |ui| {
-            Self::show_points_table(ui, vacuum, "vacuum_pts");
-        });
-
-        ui.collapsing("Sampled Points (Drag)", |ui| {
-            Self::show_points_table(ui, drag, "drag_pts");
-        });
     }
 
     /// Render a table of sampled trajectory points.
@@ -233,113 +290,97 @@ impl KinematicsPanel {
     // Simulation logic
     // -----------------------------------------------------------------------
 
-    /// Run the vacuum and drag trajectory calculations.
+    /// Run the vacuum and drag trajectory calculations using the physics API.
     fn calculate(&mut self) {
         self.error_message = None;
+        self.vacuum_trajectory = None;
+        self.drag_trajectory = None;
+        self.vacuum_samples.clear();
+        self.drag_samples.clear();
+        self.show_csv = false;
 
         let angle_rad = self.angle_deg.to_radians();
-        let vx = self.velocity * angle_rad.cos();
-        let vy = self.velocity * angle_rad.sin();
+        let num_points = 1000;
 
-        let dt = 0.001;
-        let max_steps = 500_000;
-
-        // Vacuum trajectory (no drag).
-        self.vacuum_trajectory = Some(Self::integrate_trajectory(
-            vx,
-            vy,
-            self.initial_height,
+        // Vacuum trajectory (analytical).
+        match kinematics::vacuum_trajectory(
+            self.velocity,
+            angle_rad,
             self.gravity,
-            DragModel::vacuum(),
-            self.mass,
-            dt,
-            max_steps,
-        ));
+            self.initial_height,
+            num_points,
+        ) {
+            Ok(traj) => {
+                self.vacuum_samples = sample_trajectory(&traj, 25);
+                self.vacuum_trajectory = Some(traj);
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Vacuum trajectory error: {e}"));
+                return;
+            }
+        }
 
-        // Drag trajectory.
+        // Drag trajectory (numerical).
         let drag_model = DragModel::at_sea_level(self.drag_shape, self.area);
-        self.drag_trajectory = Some(Self::integrate_trajectory(
-            vx,
-            vy,
-            self.initial_height,
+        let config = SimulationConfig {
+            timestep: 0.001,
+            max_steps: 500_000,
+            ..SimulationConfig::default()
+        };
+
+        match kinematics::drag_trajectory(
+            self.velocity,
+            angle_rad,
             self.gravity,
-            drag_model,
+            &drag_model,
             self.mass,
-            dt,
-            max_steps,
-        ));
+            self.initial_height,
+            &config,
+        ) {
+            Ok(traj) => {
+                self.drag_samples = sample_trajectory(&traj, 25);
+                self.drag_trajectory = Some(traj);
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Drag trajectory error: {e}"));
+            }
+        }
     }
 
-    /// Integrate a trajectory using symplectic Euler with the given drag
-    /// model. This is a self-contained integrator so the GUI crate does not
-    /// require kinematics/trajectory modules that may not exist yet.
-    fn integrate_trajectory(
-        vx0: f64,
-        vy0: f64,
-        y0: f64,
-        gravity: f64,
-        drag_model: DragModel,
-        mass: f64,
-        dt: f64,
-        max_steps: usize,
-    ) -> Trajectory {
-        use simucad_core::types::{TrajectoryPoint, Vec2};
+    /// Export both trajectories to CSV format and show in the text area.
+    fn export_csv(&mut self) {
+        let mut combined = String::new();
 
-        let mut points = Vec::with_capacity(max_steps.min(10_000));
-        let mut x = 0.0_f64;
-        let mut y = y0;
-        let mut vx = vx0;
-        let mut vy = vy0;
-        let mut t = 0.0_f64;
-        let mut max_height = y;
-
-        // Record the initial point.
-        points.push(TrajectoryPoint {
-            time: t,
-            position: Vec2::new(x, y),
-            velocity: Vec2::new(vx, vy),
-            speed: (vx * vx + vy * vy).sqrt(),
-        });
-
-        for _ in 0..max_steps {
-            // Net acceleration: gravity + drag/mass.
-            let vel = Vec2::new(vx, vy);
-            let drag_force = drag_model.drag_force(vel);
-            let ax = drag_force.x / mass;
-            let ay = -gravity + drag_force.y / mass;
-
-            // Symplectic Euler: update velocity first, then position.
-            vx += ax * dt;
-            vy += ay * dt;
-            x += vx * dt;
-            y += vy * dt;
-            t += dt;
-
-            if y > max_height {
-                max_height = y;
-            }
-
-            points.push(TrajectoryPoint {
-                time: t,
-                position: Vec2::new(x, y),
-                velocity: Vec2::new(vx, vy),
-                speed: (vx * vx + vy * vy).sqrt(),
-            });
-
-            // Stop when the projectile hits the ground.
-            if y <= 0.0 {
-                break;
+        if let Some(ref vac) = self.vacuum_trajectory {
+            let table: DataTable = trajectory_to_table(vac, "Vacuum");
+            match table.to_csv() {
+                Ok(csv) => {
+                    combined.push_str("# Vacuum Trajectory\n");
+                    combined.push_str(&csv);
+                    combined.push('\n');
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("CSV export error: {e}"));
+                    return;
+                }
             }
         }
 
-        let range = points.last().map(|p| p.position.x).unwrap_or(0.0);
-        let flight_time = points.last().map(|p| p.time).unwrap_or(0.0);
-
-        Trajectory {
-            points,
-            max_height,
-            range,
-            flight_time,
+        if let Some(ref drg) = self.drag_trajectory {
+            let table: DataTable = trajectory_to_table(drg, "Drag");
+            match table.to_csv() {
+                Ok(csv) => {
+                    combined.push_str("# Drag Trajectory\n");
+                    combined.push_str(&csv);
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("CSV export error: {e}"));
+                    return;
+                }
+            }
         }
+
+        self.csv_output = combined;
+        self.show_csv = true;
     }
 }
