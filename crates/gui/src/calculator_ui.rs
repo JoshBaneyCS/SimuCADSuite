@@ -1,10 +1,13 @@
 //! Scientific calculator UI panel.
 //!
 //! Provides a text input for mathematical expressions with buttons for
-//! evaluation, symbolic differentiation, and function plotting. CAS-dependent
-//! features are gated behind `#[cfg(feature = "cas")]`.
+//! evaluation, symbolic differentiation, integration, root-finding, and
+//! function plotting. CAS-dependent features are gated behind
+//! `#[cfg(feature = "cas")]`.
 
 use egui::Ui;
+
+use crate::plotting;
 
 // ---------------------------------------------------------------------------
 // Panel state
@@ -14,15 +17,17 @@ use egui::Ui;
 pub struct CalculatorPanel {
     /// The current expression string typed by the user.
     pub expression_input: String,
-    /// The variable to differentiate with respect to.
+    /// The variable to differentiate/integrate with respect to.
     pub diff_variable: String,
     /// Result of the last operation (evaluation, differentiation, etc.).
     pub result: Option<String>,
+    /// LaTeX preview string.
+    pub latex_preview: Option<String>,
     /// Plot data for the most recently plotted function: `(x, y)` pairs.
     pub plot_data: Vec<(f64, f64)>,
-    /// X-axis range for plotting.
+    /// X-axis minimum for plotting.
     pub plot_x_min: f64,
-    /// X-axis range for plotting.
+    /// X-axis maximum for plotting.
     pub plot_x_max: f64,
     /// Number of sample points for plotting.
     pub plot_samples: usize,
@@ -36,6 +41,7 @@ impl Default for CalculatorPanel {
             expression_input: String::new(),
             diff_variable: "x".into(),
             result: None,
+            latex_preview: None,
             plot_data: Vec::new(),
             plot_x_min: -10.0,
             plot_x_max: 10.0,
@@ -55,6 +61,66 @@ impl CalculatorPanel {
         ui.heading("Scientific Calculator");
         ui.add_space(8.0);
 
+        #[cfg(not(feature = "cas"))]
+        {
+            self.show_no_cas(ui);
+        }
+
+        #[cfg(feature = "cas")]
+        {
+            self.show_cas(ui);
+        }
+    }
+
+    /// Shown when the CAS feature is not enabled.
+    #[cfg(not(feature = "cas"))]
+    fn show_no_cas(&mut self, ui: &mut Ui) {
+        ui.label("The CAS feature is not enabled. Rebuild with --features cas to use the scientific calculator.");
+        ui.add_space(8.0);
+
+        // Provide basic numeric evaluation.
+        ui.horizontal(|ui| {
+            ui.label("Expression:");
+            let response = ui.text_edit_singleline(&mut self.expression_input);
+            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                self.evaluate_builtin();
+            }
+        });
+
+        ui.add_space(4.0);
+        if ui.button("Evaluate (basic)").clicked() {
+            self.evaluate_builtin();
+        }
+
+        if let Some(ref result) = self.result {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.strong("Result:");
+                ui.label(result);
+            });
+        }
+    }
+
+    /// Minimal built-in evaluator for simple arithmetic when CAS is off.
+    #[cfg(not(feature = "cas"))]
+    fn evaluate_builtin(&mut self) {
+        let expr = self.expression_input.trim();
+        if expr.is_empty() {
+            self.result = Some("(empty expression)".into());
+            return;
+        }
+        if let Ok(val) = expr.parse::<f64>() {
+            let result_str = format!("{val}");
+            self.history.push((expr.to_string(), result_str.clone()));
+            self.result = Some(result_str);
+            return;
+        }
+        self.result = Some("Enable 'cas' feature for full expression evaluation".into());
+    }
+
+    /// Full CAS-powered calculator UI.
+    #[cfg(feature = "cas")]
+    fn show_cas(&mut self, ui: &mut Ui) {
         // Expression input.
         ui.horizontal(|ui| {
             ui.label("f(x) =");
@@ -66,37 +132,35 @@ impl CalculatorPanel {
 
         ui.add_space(6.0);
 
+        // Variable selector.
+        ui.horizontal(|ui| {
+            ui.label("Variable:");
+            ui.text_edit_singleline(&mut self.diff_variable);
+        });
+
+        ui.add_space(4.0);
+
         // Action buttons.
         ui.horizontal(|ui| {
             if ui.button("Evaluate").clicked() {
                 self.evaluate();
             }
-
-            #[cfg(feature = "cas")]
-            {
-                ui.separator();
-                if ui.button("Differentiate").clicked() {
-                    self.differentiate();
-                }
-                ui.label("w.r.t.");
-                ui.text_edit_singleline(&mut self.diff_variable);
+            if ui.button("Differentiate").clicked() {
+                self.differentiate();
             }
-
-            #[cfg(not(feature = "cas"))]
-            {
-                ui.separator();
-                ui.add_enabled(false, egui::Button::new("Differentiate"))
-                    .on_disabled_hover_text("Enable the 'cas' feature to use symbolic differentiation");
+            if ui.button("Integrate").clicked() {
+                self.integrate();
             }
-
-            ui.separator();
+            if ui.button("Find Roots").clicked() {
+                self.find_roots();
+            }
             if ui.button("Plot").clicked() {
                 self.generate_plot();
             }
-
             if ui.button("Clear").clicked() {
                 self.expression_input.clear();
                 self.result = None;
+                self.latex_preview = None;
                 self.plot_data.clear();
             }
         });
@@ -122,10 +186,19 @@ impl CalculatorPanel {
             });
         }
 
+        // LaTeX preview.
+        if let Some(ref latex) = self.latex_preview {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.strong("LaTeX:");
+                ui.monospace(latex);
+            });
+        }
+
         // Plot display.
         if !self.plot_data.is_empty() {
             ui.add_space(8.0);
-            crate::plotting::plot_function_2d(ui, &self.plot_data, &self.expression_input);
+            plotting::plot_function_2d(ui, &self.plot_data, &self.expression_input);
         }
 
         // History.
@@ -144,46 +217,12 @@ impl CalculatorPanel {
     }
 
     // -----------------------------------------------------------------------
-    // Operations
+    // CAS operations
     // -----------------------------------------------------------------------
 
     /// Evaluate the current expression numerically.
-    fn evaluate(&mut self) {
-        #[cfg(feature = "cas")]
-        {
-            self.evaluate_with_cas();
-        }
-
-        #[cfg(not(feature = "cas"))]
-        {
-            self.evaluate_builtin();
-        }
-    }
-
-    /// Minimal built-in evaluator for simple arithmetic when the CAS feature
-    /// is not enabled. Supports basic Rust-parseable float expressions.
-    #[cfg(not(feature = "cas"))]
-    fn evaluate_builtin(&mut self) {
-        let expr = self.expression_input.trim();
-        if expr.is_empty() {
-            self.result = Some("(empty expression)".into());
-            return;
-        }
-
-        // Attempt trivial numeric parse first.
-        if let Ok(val) = expr.parse::<f64>() {
-            let result_str = format!("{val}");
-            self.history.push((expr.to_string(), result_str.clone()));
-            self.result = Some(result_str);
-            return;
-        }
-
-        self.result = Some("Enable 'cas' feature for full expression evaluation".into());
-    }
-
-    /// Evaluate using the CAS crate's parser and evaluator.
     #[cfg(feature = "cas")]
-    fn evaluate_with_cas(&mut self) {
+    fn evaluate(&mut self) {
         let expr_str = self.expression_input.trim();
         if expr_str.is_empty() {
             self.result = Some("(empty expression)".into());
@@ -192,11 +231,15 @@ impl CalculatorPanel {
 
         match simucad_cas::parser::parse(expr_str) {
             Ok(ast) => {
+                // Set LaTeX preview.
+                self.latex_preview = Some(simucad_cas::latex::to_latex(&ast));
+
                 let env = simucad_cas::evaluator::Environment::new();
                 match simucad_cas::evaluator::evaluate(&ast, &env) {
                     Ok(val) => {
                         let result_str = format!("{val}");
-                        self.history.push((expr_str.to_string(), result_str.clone()));
+                        self.history
+                            .push((expr_str.to_string(), result_str.clone()));
                         self.result = Some(result_str);
                     }
                     Err(e) => {
@@ -221,11 +264,18 @@ impl CalculatorPanel {
 
         match simucad_cas::parser::parse(expr_str) {
             Ok(ast) => {
+                self.latex_preview = Some(simucad_cas::latex::to_latex(&ast));
+
                 match simucad_cas::derivative::differentiate(&ast, &self.diff_variable) {
                     Ok(derivative) => {
                         let simplified = simucad_cas::simplify::simplify(&derivative);
                         let result_str = format!("{simplified}");
-                        self.history.push((format!("d/d{} {}", self.diff_variable, expr_str), result_str.clone()));
+                        let latex = simucad_cas::latex::to_latex(&simplified);
+                        self.latex_preview = Some(latex);
+                        self.history.push((
+                            format!("d/d{} {}", self.diff_variable, expr_str),
+                            result_str.clone(),
+                        ));
                         self.result = Some(result_str);
                     }
                     Err(e) => {
@@ -239,22 +289,102 @@ impl CalculatorPanel {
         }
     }
 
-    /// Generate plot data for the current expression.
-    fn generate_plot(&mut self) {
-        #[cfg(feature = "cas")]
-        {
-            self.generate_plot_cas();
+    /// Symbolically integrate the expression.
+    #[cfg(feature = "cas")]
+    fn integrate(&mut self) {
+        let expr_str = self.expression_input.trim();
+        if expr_str.is_empty() {
+            self.result = Some("(empty expression)".into());
+            return;
         }
 
-        #[cfg(not(feature = "cas"))]
-        {
-            self.generate_plot_builtin();
+        match simucad_cas::parser::parse(expr_str) {
+            Ok(ast) => {
+                self.latex_preview = Some(simucad_cas::latex::to_latex(&ast));
+
+                match simucad_cas::integration::integrate(&ast, &self.diff_variable) {
+                    Ok(integral) => {
+                        let simplified = simucad_cas::simplify::simplify(&integral);
+                        let result_str = format!("{simplified}");
+                        let latex = simucad_cas::latex::to_latex(&simplified);
+                        self.latex_preview = Some(latex);
+                        self.history.push((
+                            format!("int {} d{}", expr_str, self.diff_variable),
+                            result_str.clone(),
+                        ));
+                        self.result = Some(result_str);
+                    }
+                    Err(e) => {
+                        self.result = Some(format!("Integration error: {e}"));
+                    }
+                }
+            }
+            Err(e) => {
+                self.result = Some(format!("Parse error: {e}"));
+            }
         }
     }
 
-    /// Plot using the CAS evaluator.
+    /// Find roots of the expression using Newton-Raphson.
     #[cfg(feature = "cas")]
-    fn generate_plot_cas(&mut self) {
+    fn find_roots(&mut self) {
+        let expr_str = self.expression_input.trim();
+        if expr_str.is_empty() {
+            self.result = Some("(empty expression)".into());
+            return;
+        }
+
+        match simucad_cas::parser::parse(expr_str) {
+            Ok(ast) => {
+                self.latex_preview = Some(simucad_cas::latex::to_latex(&ast));
+
+                // Try several initial guesses to find different roots.
+                let guesses = [-10.0, -5.0, -1.0, 0.0, 1.0, 5.0, 10.0];
+                let tolerance = 1e-10;
+                let max_iter = 200;
+                let mut roots: Vec<f64> = Vec::new();
+
+                for guess in guesses {
+                    if let Ok(root) = simucad_cas::solver::solve_numeric(
+                        &ast,
+                        &self.diff_variable,
+                        guess,
+                        tolerance,
+                        max_iter,
+                    ) {
+                        // Only add if not a duplicate (within tolerance).
+                        let is_dup = roots.iter().any(|r| (r - root).abs() < 1e-6);
+                        if !is_dup {
+                            roots.push(root);
+                        }
+                    }
+                }
+
+                if roots.is_empty() {
+                    self.result = Some("No roots found in the search range".into());
+                } else {
+                    roots.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    let result_str = roots
+                        .iter()
+                        .map(|r| format!("{:.6}", r))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.history.push((
+                        format!("roots of {}", expr_str),
+                        result_str.clone(),
+                    ));
+                    self.result = Some(format!("Roots: {result_str}"));
+                }
+            }
+            Err(e) => {
+                self.result = Some(format!("Parse error: {e}"));
+            }
+        }
+    }
+
+    /// Generate plot data for the current expression.
+    #[cfg(feature = "cas")]
+    fn generate_plot(&mut self) {
         let expr_str = self.expression_input.trim();
         if expr_str.is_empty() {
             return;
@@ -262,13 +392,16 @@ impl CalculatorPanel {
 
         match simucad_cas::parser::parse(expr_str) {
             Ok(ast) => {
+                self.latex_preview = Some(simucad_cas::latex::to_latex(&ast));
+
                 let mut points = Vec::with_capacity(self.plot_samples);
-                let dx = (self.plot_x_max - self.plot_x_min) / (self.plot_samples - 1).max(1) as f64;
+                let dx =
+                    (self.plot_x_max - self.plot_x_min) / (self.plot_samples - 1).max(1) as f64;
 
                 for i in 0..self.plot_samples {
                     let x = self.plot_x_min + i as f64 * dx;
                     let mut env = simucad_cas::evaluator::Environment::new();
-                    env.set("x", x);
+                    env.set(&self.diff_variable, x);
 
                     if let Ok(y) = simucad_cas::evaluator::evaluate(&ast, &env) {
                         if y.is_finite() {
@@ -284,11 +417,5 @@ impl CalculatorPanel {
                 self.result = Some(format!("Parse error: {e}"));
             }
         }
-    }
-
-    /// Placeholder plot generation when CAS is not available.
-    #[cfg(not(feature = "cas"))]
-    fn generate_plot_builtin(&mut self) {
-        self.result = Some("Enable 'cas' feature for function plotting".into());
     }
 }

@@ -1,9 +1,13 @@
 //! Settings dialog UI.
 //!
-//! Renders toggle switches and path editors for all [`AppSettings`] fields.
+//! Renders toggle switches, sliders, and path editors for all [`AppSettings`]
+//! fields, with Save and Reset to Defaults buttons.
 
 use egui::Ui;
 use simucad_core::settings::AppSettings;
+
+/// Status message for save feedback.
+static SETTINGS_FILE: &str = "simucad_settings.toml";
 
 /// Render the settings editor into the given `Ui`.
 pub fn show_settings(ui: &mut Ui, settings: &mut AppSettings) {
@@ -16,7 +20,12 @@ pub fn show_settings(ui: &mut Ui, settings: &mut AppSettings) {
     ui.collapsing("Appearance", |ui| {
         ui.horizontal(|ui| {
             ui.label("Dark mode:");
-            ui.checkbox(&mut settings.appearance.dark_mode, "");
+            if ui.checkbox(&mut settings.appearance.dark_mode, "").changed() {
+                tracing::info!(
+                    "Dark mode toggled to {}",
+                    settings.appearance.dark_mode
+                );
+            }
         });
     });
 
@@ -40,7 +49,11 @@ pub fn show_settings(ui: &mut Ui, settings: &mut AppSettings) {
             ui.label("Thread count (0 = auto):");
             let mut count = settings.compute.thread_count.unwrap_or(0);
             if ui
-                .add(egui::DragValue::new(&mut count).speed(1.0).range(0..=256))
+                .add(
+                    egui::Slider::new(&mut count, 0..=256)
+                        .text("threads")
+                        .clamping(egui::SliderClamping::Always),
+                )
                 .changed()
             {
                 settings.compute.thread_count = if count == 0 { None } else { Some(count) };
@@ -97,10 +110,11 @@ pub fn show_settings(ui: &mut Ui, settings: &mut AppSettings) {
     ui.horizontal(|ui| {
         if ui.button("Reset to Defaults").clicked() {
             *settings = AppSettings::default();
+            tracing::info!("Settings reset to defaults");
         }
 
         if ui.button("Save Settings").clicked() {
-            let path = std::path::Path::new("simucad_settings.toml");
+            let path = std::path::Path::new(SETTINGS_FILE);
             match settings.save(path) {
                 Ok(()) => {
                     tracing::info!("Settings saved to {}", path.display());

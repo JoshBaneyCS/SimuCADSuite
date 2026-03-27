@@ -108,22 +108,51 @@ impl eframe::App for SimuApp {
                 });
 
                 // Navigation breadcrumbs on the right side of the menu bar.
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let pages = [
-                        Page::Home,
-                        Page::Kinematics,
-                        Page::FluidDynamics,
-                        Page::Calculator,
-                    ];
-                    for page in pages.iter().rev() {
-                        let label = page.label();
-                        let is_current = *page == self.current_page;
-                        let button = egui::Button::new(label).selected(is_current);
-                        if ui.add(button).clicked() {
-                            self.current_page = *page;
+                ui.with_layout(
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        let pages = [
+                            Page::Home,
+                            Page::Kinematics,
+                            Page::FluidDynamics,
+                            Page::Calculator,
+                        ];
+                        for page in pages.iter().rev() {
+                            let label = page.label();
+                            let is_current = *page == self.current_page;
+                            let button = egui::Button::new(label).selected(is_current);
+                            if ui.add(button).clicked() {
+                                self.current_page = *page;
+                            }
                         }
-                    }
-                });
+                    },
+                );
+            });
+        });
+
+        // ---------------------------------------------------------------
+        // Status bar at bottom
+        // ---------------------------------------------------------------
+        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "SimuCADSuite v{}",
+                        env!("CARGO_PKG_VERSION")
+                    ))
+                    .small()
+                    .weak(),
+                );
+                ui.with_layout(
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new(self.current_page.label())
+                                .small()
+                                .weak(),
+                        );
+                    },
+                );
             });
         });
 
@@ -143,7 +172,7 @@ impl eframe::App for SimuApp {
         }
 
         // ---------------------------------------------------------------
-        // Central panel — renders the current page
+        // Central panel -- renders the current page
         // ---------------------------------------------------------------
         egui::CentralPanel::default().show(ctx, |ui| {
             match self.current_page {
