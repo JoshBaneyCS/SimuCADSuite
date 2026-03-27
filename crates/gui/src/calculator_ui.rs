@@ -31,6 +31,10 @@ pub struct CalculatorPanel {
     pub plot_x_max: f64,
     /// Number of sample points for plotting.
     pub plot_samples: usize,
+    /// Taylor series expansion order.
+    pub taylor_order: usize,
+    /// Taylor series expansion center.
+    pub taylor_center: f64,
     /// History of previous expressions and results.
     pub history: Vec<(String, String)>,
 }
@@ -46,6 +50,8 @@ impl Default for CalculatorPanel {
             plot_x_min: -10.0,
             plot_x_max: 10.0,
             plot_samples: 500,
+            taylor_order: 5,
+            taylor_center: 0.0,
             history: Vec::new(),
         }
     }
@@ -154,6 +160,12 @@ impl CalculatorPanel {
             if ui.button("Find Roots").clicked() {
                 self.find_roots();
             }
+            if ui.button("Taylor").clicked() {
+                self.taylor_expand();
+            }
+            if ui.button("Solve").clicked() {
+                self.solve_equation();
+            }
             if ui.button("Plot").clicked() {
                 self.generate_plot();
             }
@@ -173,6 +185,14 @@ impl CalculatorPanel {
             ui.add(egui::DragValue::new(&mut self.plot_x_max).speed(0.5).prefix("max: "));
             ui.label("samples:");
             ui.add(egui::DragValue::new(&mut self.plot_samples).speed(1.0).range(10..=10_000));
+        });
+
+        // Taylor series controls.
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label("Taylor:");
+            ui.add(egui::DragValue::new(&mut self.taylor_order).speed(0.1).prefix("order: ").range(0..=20));
+            ui.add(egui::DragValue::new(&mut self.taylor_center).speed(0.1).prefix("center: "));
         });
 
         ui.add_space(8.0);
@@ -374,6 +394,89 @@ impl CalculatorPanel {
                         result_str.clone(),
                     ));
                     self.result = Some(format!("Roots: {result_str}"));
+                }
+            }
+            Err(e) => {
+                self.result = Some(format!("Parse error: {e}"));
+            }
+        }
+    }
+
+    /// Compute the Taylor series expansion of the expression.
+    #[cfg(feature = "cas")]
+    fn taylor_expand(&mut self) {
+        let expr_str = self.expression_input.trim();
+        if expr_str.is_empty() {
+            self.result = Some("(empty expression)".into());
+            return;
+        }
+
+        match simucad_cas::parser::parse(expr_str) {
+            Ok(ast) => {
+                self.latex_preview = Some(simucad_cas::latex::to_latex(&ast));
+
+                match simucad_cas::taylor::taylor_expand(
+                    &ast,
+                    &self.diff_variable,
+                    self.taylor_center,
+                    self.taylor_order,
+                ) {
+                    Ok(expansion) => {
+                        let simplified = simucad_cas::simplify::simplify(&expansion);
+                        let result_str = format!("{simplified}");
+                        let latex = simucad_cas::latex::to_latex(&simplified);
+                        self.latex_preview = Some(latex);
+                        self.history.push((
+                            format!(
+                                "taylor({}, {}, order={})",
+                                expr_str, self.taylor_center, self.taylor_order
+                            ),
+                            result_str.clone(),
+                        ));
+                        self.result = Some(result_str);
+                    }
+                    Err(e) => {
+                        self.result = Some(format!("Taylor error: {e}"));
+                    }
+                }
+            }
+            Err(e) => {
+                self.result = Some(format!("Parse error: {e}"));
+            }
+        }
+    }
+
+    /// Solve the expression = 0 for the variable.
+    #[cfg(feature = "cas")]
+    fn solve_equation(&mut self) {
+        let expr_str = self.expression_input.trim();
+        if expr_str.is_empty() {
+            self.result = Some("(empty expression)".into());
+            return;
+        }
+
+        match simucad_cas::parser::parse(expr_str) {
+            Ok(ast) => {
+                self.latex_preview = Some(simucad_cas::latex::to_latex(&ast));
+
+                // Try quadratic first (handles linear too).
+                match simucad_cas::equations::solve_quadratic(&ast, &self.diff_variable) {
+                    Ok(roots) => {
+                        let result_str = roots
+                            .iter()
+                            .map(|r| format!("{r}"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        self.history.push((
+                            format!("solve {} = 0", expr_str),
+                            result_str.clone(),
+                        ));
+                        self.result = Some(format!("Solutions: {result_str}"));
+                    }
+                    Err(_) => {
+                        // Fall back to numeric root finding.
+                        self.find_roots();
+                    }
                 }
             }
             Err(e) => {

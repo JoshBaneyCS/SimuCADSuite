@@ -140,6 +140,22 @@ fn simplify_once(expr: &Expr) -> Expr {
                     if l.is_one() {
                         return Expr::num(1.0);
                     }
+                    // (x^a)^b = x^(a*b) when both exponents are numeric constants
+                    if let Expr::BinOp {
+                        op: BinOp::Pow,
+                        lhs: base,
+                        rhs: inner_exp,
+                    } = &l
+                    {
+                        if let (Expr::Num(a), Expr::Num(b)) =
+                            (inner_exp.as_ref(), &r)
+                        {
+                            return Expr::pow(
+                                base.as_ref().clone(),
+                                Expr::num(a * b),
+                            );
+                        }
+                    }
                     Expr::pow(l, r)
                 }
             }
@@ -161,6 +177,17 @@ fn simplify_once(expr: &Expr) -> Expr {
                         if *arg == Expr::var("pi") {
                             return Expr::num(0.0);
                         }
+                        // sin(-x) = -sin(x)  (odd function)
+                        if let Expr::UnaryOp {
+                            op: UnaryOp::Neg,
+                            operand,
+                        } = arg
+                        {
+                            return Expr::neg(Expr::func(
+                                "sin",
+                                vec![operand.as_ref().clone()],
+                            ));
+                        }
                     }
                     "cos" => {
                         // cos(0) = 1
@@ -170,6 +197,55 @@ fn simplify_once(expr: &Expr) -> Expr {
                         // cos(pi) = -1
                         if *arg == Expr::var("pi") {
                             return Expr::num(-1.0);
+                        }
+                        // cos(-x) = cos(x)  (even function)
+                        if let Expr::UnaryOp {
+                            op: UnaryOp::Neg,
+                            operand,
+                        } = arg
+                        {
+                            return Expr::func(
+                                "cos",
+                                vec![operand.as_ref().clone()],
+                            );
+                        }
+                    }
+                    "ln" | "log" => {
+                        // ln(1) = 0, log(1) = 0
+                        if arg.is_one() {
+                            return Expr::num(0.0);
+                        }
+                        // ln(e) = 1, log(e) = 1
+                        if *arg == Expr::var("e") {
+                            return Expr::num(1.0);
+                        }
+                        // ln(exp(x)) = x
+                        if let Expr::Func {
+                            name: inner_name,
+                            args: inner_args,
+                        } = arg
+                        {
+                            if inner_name == "exp" && inner_args.len() == 1 {
+                                return inner_args[0].clone();
+                            }
+                        }
+                    }
+                    "exp" => {
+                        // exp(0) = 1
+                        if arg.is_zero() {
+                            return Expr::num(1.0);
+                        }
+                        // exp(ln(x)) = x  (also exp(log(x)) = x)
+                        if let Expr::Func {
+                            name: inner_name,
+                            args: inner_args,
+                        } = arg
+                        {
+                            if (inner_name == "ln" || inner_name == "log")
+                                && inner_args.len() == 1
+                            {
+                                return inner_args[0].clone();
+                            }
                         }
                     }
                     _ => {}
@@ -486,5 +562,101 @@ mod tests {
     fn test_simplify_cos_pi() {
         let e = Expr::func("cos", vec![Expr::var("pi")]);
         assert_eq!(simplify(&e), Expr::num(-1.0));
+    }
+
+    // --- Logarithm rules ---
+
+    #[test]
+    fn test_simplify_ln_1() {
+        let e = Expr::func("ln", vec![Expr::num(1.0)]);
+        assert_eq!(simplify(&e), Expr::num(0.0));
+    }
+
+    #[test]
+    fn test_simplify_log_1() {
+        let e = Expr::func("log", vec![Expr::num(1.0)]);
+        assert_eq!(simplify(&e), Expr::num(0.0));
+    }
+
+    #[test]
+    fn test_simplify_ln_e() {
+        let e = Expr::func("ln", vec![Expr::var("e")]);
+        assert_eq!(simplify(&e), Expr::num(1.0));
+    }
+
+    #[test]
+    fn test_simplify_log_e() {
+        let e = Expr::func("log", vec![Expr::var("e")]);
+        assert_eq!(simplify(&e), Expr::num(1.0));
+    }
+
+    // --- Exponential rules ---
+
+    #[test]
+    fn test_simplify_exp_0() {
+        let e = Expr::func("exp", vec![Expr::num(0.0)]);
+        assert_eq!(simplify(&e), Expr::num(1.0));
+    }
+
+    #[test]
+    fn test_simplify_exp_ln_x() {
+        // exp(ln(x)) = x
+        let e = Expr::func("exp", vec![Expr::func("ln", vec![Expr::var("x")])]);
+        assert_eq!(simplify(&e), Expr::var("x"));
+    }
+
+    #[test]
+    fn test_simplify_ln_exp_x() {
+        // ln(exp(x)) = x
+        let e = Expr::func("ln", vec![Expr::func("exp", vec![Expr::var("x")])]);
+        assert_eq!(simplify(&e), Expr::var("x"));
+    }
+
+    #[test]
+    fn test_simplify_exp_log_x() {
+        // exp(log(x)) = x
+        let e = Expr::func("exp", vec![Expr::func("log", vec![Expr::var("x")])]);
+        assert_eq!(simplify(&e), Expr::var("x"));
+    }
+
+    // --- Trig odd/even rules ---
+
+    #[test]
+    fn test_simplify_sin_neg_x() {
+        // sin(-x) = -sin(x)
+        let e = Expr::func("sin", vec![Expr::neg(Expr::var("x"))]);
+        assert_eq!(
+            simplify(&e),
+            Expr::neg(Expr::func("sin", vec![Expr::var("x")]))
+        );
+    }
+
+    #[test]
+    fn test_simplify_cos_neg_x() {
+        // cos(-x) = cos(x)
+        let e = Expr::func("cos", vec![Expr::neg(Expr::var("x"))]);
+        assert_eq!(simplify(&e), Expr::func("cos", vec![Expr::var("x")]));
+    }
+
+    // --- Power simplification ---
+
+    #[test]
+    fn test_simplify_power_of_power() {
+        // (x^2)^3 = x^6
+        let e = Expr::pow(
+            Expr::pow(Expr::var("x"), Expr::num(2.0)),
+            Expr::num(3.0),
+        );
+        assert_eq!(simplify(&e), Expr::pow(Expr::var("x"), Expr::num(6.0)));
+    }
+
+    #[test]
+    fn test_simplify_power_of_power_fractional() {
+        // (x^4)^(0.5) = x^2
+        let e = Expr::pow(
+            Expr::pow(Expr::var("x"), Expr::num(4.0)),
+            Expr::num(0.5),
+        );
+        assert_eq!(simplify(&e), Expr::pow(Expr::var("x"), Expr::num(2.0)));
     }
 }
