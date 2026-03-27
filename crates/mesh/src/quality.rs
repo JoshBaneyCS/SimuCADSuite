@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use simucad_core::types::Vec3;
 
 use crate::types::{ElementType, Mesh, MeshElement};
@@ -222,48 +223,45 @@ pub fn compute_mesh_quality(mesh: &Mesh) -> Option<MeshQualityReport> {
         return None;
     }
 
+    // Compute per-element quality in parallel
+    let qualities: Vec<ElementQuality> = mesh.elements
+        .par_iter()
+        .map(|elem| compute_element_quality(&mesh.nodes, elem))
+        .collect();
+
     let mut sum_aspect = 0.0;
     let mut sum_skewness = 0.0;
     let mut total_area_volume = 0.0;
     let mut degenerate_count = 0usize;
+    let mut min_quality: Option<&ElementQuality> = None;
+    let mut max_quality: Option<&ElementQuality> = None;
 
-    // Track min/max quality records.
-    let mut min_quality: Option<ElementQuality> = None;
-    let mut max_quality: Option<ElementQuality> = None;
-
-    for elem in &mesh.elements {
-        let q = compute_element_quality(&mesh.nodes, elem);
-
+    for q in &qualities {
         sum_aspect += q.aspect_ratio;
         sum_skewness += q.skewness;
         total_area_volume += q.area_or_volume;
-
         if q.area_or_volume < DEGENERATE_EPSILON {
             degenerate_count += 1;
         }
-
-        // Track element with worst (highest) aspect ratio as max_quality,
-        // and element with best (lowest) aspect ratio as min_quality.
         match &min_quality {
-            None => min_quality = Some(q.clone()),
-            Some(cur) if q.aspect_ratio < cur.aspect_ratio => min_quality = Some(q.clone()),
+            None => min_quality = Some(q),
+            Some(cur) if q.aspect_ratio < cur.aspect_ratio => min_quality = Some(q),
             _ => {}
         }
         match &max_quality {
-            None => max_quality = Some(q.clone()),
-            Some(cur) if q.aspect_ratio > cur.aspect_ratio => max_quality = Some(q.clone()),
+            None => max_quality = Some(q),
+            Some(cur) if q.aspect_ratio > cur.aspect_ratio => max_quality = Some(q),
             _ => {}
         }
     }
 
     let n = mesh.elements.len() as f64;
-
     Some(MeshQualityReport {
         element_count: mesh.elements.len(),
         node_count: mesh.nodes.len(),
         dimension: mesh.dimension,
-        min_quality: min_quality.unwrap(),
-        max_quality: max_quality.unwrap(),
+        min_quality: min_quality.unwrap().clone(),
+        max_quality: max_quality.unwrap().clone(),
         mean_aspect_ratio: sum_aspect / n,
         mean_skewness: sum_skewness / n,
         total_area_or_volume: total_area_volume,

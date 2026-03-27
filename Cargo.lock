@@ -3250,6 +3250,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 name = "simucad-audio"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "rustfft",
  "serde",
  "simucad-core",
@@ -3261,6 +3262,7 @@ dependencies = [
 name = "simucad-cas"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "simucad-core",
  "tracing",
 ]
@@ -3281,6 +3283,7 @@ name = "simucad-gpu"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "criterion",
  "pollster",
  "rayon",
  "simucad-core",
@@ -3309,7 +3312,9 @@ dependencies = [
 name = "simucad-mesh"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "nom",
+ "rayon",
  "serde",
  "simucad-core",
  "tracing",

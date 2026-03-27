@@ -61,15 +61,20 @@ impl ComputeBackend for CpuBackend {
 
         let n = particles.len() as f64;
 
+        // Pre-compute mean particle position in O(N)
+        let (sum_x, sum_y, sum_z) = particles.par_iter().fold(
+            || (0.0f64, 0.0f64, 0.0f64),
+            |(sx, sy, sz), p| (sx + p.position.x, sy + p.position.y, sz + p.position.z),
+        ).reduce(
+            || (0.0, 0.0, 0.0),
+            |(sx1, sy1, sz1), (sx2, sy2, sz2)| (sx1 + sx2, sy1 + sy2, sz1 + sz2),
+        );
+        let mean = Vec3::new(sum_x / n, sum_y / n, sum_z / n);
+
+        // For each node: mean_displacement = mean_position - node (O(M))
         let result: Vec<Vec3> = node_positions
             .par_iter()
-            .map(|node| {
-                let sum = particles.iter().fold(Vec3::ZERO, |acc, p| {
-                    let diff = p.position - *node;
-                    acc + diff
-                });
-                Vec3::new(sum.x / n, sum.y / n, sum.z / n)
-            })
+            .map(|node| mean - *node)
             .collect();
 
         Ok(result)

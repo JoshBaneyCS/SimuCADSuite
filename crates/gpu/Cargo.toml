@@ -19,3 +19,8 @@ default = []
 cuda = []
 
 [dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "gpu_bench"
+harness = false

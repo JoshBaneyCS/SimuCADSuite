@@ -112,13 +112,12 @@ pub fn compute_stft(
 
     let mut frames: Vec<Spectrum> = Vec::new();
     let mut offset = 0;
+    let mut buffer: Vec<Complex<f64>> = vec![Complex::new(0.0, 0.0); window_size];
 
     while offset + window_size <= samples.len() {
-        // Build windowed buffer.
-        let mut buffer: Vec<Complex<f64>> = Vec::with_capacity(window_size);
+        // Fill windowed buffer (reused across frames).
         for i in 0..window_size {
-            let s = samples[offset + i];
-            buffer.push(Complex::new(s * window[i], 0.0));
+            buffer[i] = Complex::new(samples[offset + i] * window[i], 0.0);
         }
 
         fft.process(&mut buffer);

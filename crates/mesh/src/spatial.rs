@@ -234,8 +234,9 @@ fn build_recursive(entries: &mut [BVHEntry], out: &mut Vec<BVHNode>) -> usize {
         2
     };
 
-    // Sort by centroid along chosen axis and split at median.
-    entries.sort_by(|a, b| {
+    // Partition at median along chosen axis (O(n) instead of O(n log n) sort).
+    let mid = entries.len() / 2;
+    entries.select_nth_unstable_by(mid, |a, b| {
         let va = match axis {
             0 => a.centroid.x,
             1 => a.centroid.y,
@@ -248,8 +249,6 @@ fn build_recursive(entries: &mut [BVHEntry], out: &mut Vec<BVHNode>) -> usize {
         };
         va.partial_cmp(&vb).unwrap_or(std::cmp::Ordering::Equal)
     });
-
-    let mid = entries.len() / 2;
     let (left_entries, right_entries) = entries.split_at_mut(mid);
 
     // Reserve a slot for this internal node.
