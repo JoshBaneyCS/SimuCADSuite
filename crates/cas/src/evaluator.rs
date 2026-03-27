@@ -142,6 +142,33 @@ pub fn evaluate(expr: &Expr, env: &Environment) -> Result<f64, CasError> {
                     }
                 }
                 "abs" => Ok(arg.abs()),
+                "sinh" => Ok(arg.sinh()),
+                "cosh" => Ok(arg.cosh()),
+                "tanh" => Ok(arg.tanh()),
+                "asinh" => Ok(arg.asinh()),
+                "acosh" => {
+                    if arg < 1.0 {
+                        Err(CasError::DomainError(format!(
+                            "acosh argument {} must be >= 1",
+                            arg
+                        )))
+                    } else {
+                        Ok(arg.acosh())
+                    }
+                }
+                "atanh" => {
+                    if arg <= -1.0 || arg >= 1.0 {
+                        Err(CasError::DomainError(format!(
+                            "atanh argument {} must be in (-1, 1)",
+                            arg
+                        )))
+                    } else {
+                        Ok(arg.atanh())
+                    }
+                }
+                "floor" => Ok(arg.floor()),
+                "ceil" => Ok(arg.ceil()),
+                "sign" => Ok(arg.signum()),
                 _ => Err(CasError::UnsupportedOperation(format!(
                     "unknown function: {}",
                     name
@@ -325,6 +352,105 @@ mod tests {
             evaluate(&e, &env),
             Err(CasError::UnsupportedOperation(_))
         ));
+    }
+
+    #[test]
+    fn test_eval_sinh() {
+        let env = Environment::new();
+        let e = Expr::func("sinh", vec![Expr::num(0.0)]);
+        assert!(evaluate(&e, &env).unwrap().abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_eval_sinh_value() {
+        let env = Environment::new();
+        let e = Expr::func("sinh", vec![Expr::num(1.0)]);
+        assert!((evaluate(&e, &env).unwrap() - 1.0_f64.sinh()).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_eval_cosh() {
+        let env = Environment::new();
+        let e = Expr::func("cosh", vec![Expr::num(0.0)]);
+        assert!((evaluate(&e, &env).unwrap() - 1.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_eval_tanh() {
+        let env = Environment::new();
+        let e = Expr::func("tanh", vec![Expr::num(0.0)]);
+        assert!(evaluate(&e, &env).unwrap().abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_eval_asinh() {
+        let env = Environment::new();
+        let e = Expr::func("asinh", vec![Expr::num(0.0)]);
+        assert!(evaluate(&e, &env).unwrap().abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_eval_acosh() {
+        let env = Environment::new();
+        let e = Expr::func("acosh", vec![Expr::num(1.0)]);
+        assert!(evaluate(&e, &env).unwrap().abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_eval_acosh_domain_error() {
+        let env = Environment::new();
+        let e = Expr::func("acosh", vec![Expr::num(0.5)]);
+        assert!(matches!(evaluate(&e, &env), Err(CasError::DomainError(_))));
+    }
+
+    #[test]
+    fn test_eval_atanh() {
+        let env = Environment::new();
+        let e = Expr::func("atanh", vec![Expr::num(0.0)]);
+        assert!(evaluate(&e, &env).unwrap().abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_eval_atanh_domain_error() {
+        let env = Environment::new();
+        let e = Expr::func("atanh", vec![Expr::num(1.0)]);
+        assert!(matches!(evaluate(&e, &env), Err(CasError::DomainError(_))));
+    }
+
+    #[test]
+    fn test_eval_floor() {
+        let env = Environment::new();
+        let e = Expr::func("floor", vec![Expr::num(3.7)]);
+        assert_eq!(evaluate(&e, &env).unwrap(), 3.0);
+    }
+
+    #[test]
+    fn test_eval_ceil() {
+        let env = Environment::new();
+        let e = Expr::func("ceil", vec![Expr::num(3.2)]);
+        assert_eq!(evaluate(&e, &env).unwrap(), 4.0);
+    }
+
+    #[test]
+    fn test_eval_sign_positive() {
+        let env = Environment::new();
+        let e = Expr::func("sign", vec![Expr::num(5.0)]);
+        assert_eq!(evaluate(&e, &env).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn test_eval_sign_negative() {
+        let env = Environment::new();
+        let e = Expr::func("sign", vec![Expr::num(-3.0)]);
+        assert_eq!(evaluate(&e, &env).unwrap(), -1.0);
+    }
+
+    #[test]
+    fn test_eval_sign_zero() {
+        // Rust's f64::signum(0.0) returns 1.0 (IEEE standard for positive zero)
+        let env = Environment::new();
+        let e = Expr::func("sign", vec![Expr::num(0.0)]);
+        assert_eq!(evaluate(&e, &env).unwrap(), 1.0);
     }
 
     #[test]

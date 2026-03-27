@@ -185,6 +185,10 @@ pub fn integrate(expr: &Expr, var: &str) -> Result<Expr, CasError> {
                         "cos" => Ok(Expr::func("sin", vec![Expr::var(var)])),
                         // ∫exp(x) dx = exp(x)
                         "exp" => Ok(Expr::func("exp", vec![Expr::var(var)])),
+                        // ∫sinh(x) dx = cosh(x)
+                        "sinh" => Ok(Expr::func("cosh", vec![Expr::var(var)])),
+                        // ∫cosh(x) dx = sinh(x)
+                        "cosh" => Ok(Expr::func("sinh", vec![Expr::var(var)])),
                         _ => Err(CasError::UnsupportedOperation(format!(
                             "integration of function '{}' is not supported",
                             name
@@ -321,6 +325,48 @@ mod tests {
         let s = simplify(&result);
         // At x=1: exp(1) = e
         assert!((eval_at(&s, "x", 1.0) - std::f64::consts::E).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_integrate_sinh() {
+        // ∫sinh(x) dx = cosh(x)
+        let expr = Expr::func("sinh", vec![Expr::var("x")]);
+        let result = integrate(&expr, "x").unwrap();
+        let s = simplify(&result);
+        // At x=0: cosh(0) = 1
+        assert!((eval_at(&s, "x", 0.0) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_integrate_cosh() {
+        // ∫cosh(x) dx = sinh(x)
+        let expr = Expr::func("cosh", vec![Expr::var("x")]);
+        let result = integrate(&expr, "x").unwrap();
+        let s = simplify(&result);
+        // At x=0: sinh(0) = 0
+        assert!(eval_at(&s, "x", 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_integrate_then_differentiate_sinh() {
+        // d/dx(∫sinh(x) dx) = sinh(x)
+        let expr = Expr::func("sinh", vec![Expr::var("x")]);
+        let integral = integrate(&expr, "x").unwrap();
+        let derivative = differentiate(&integral, "x").unwrap();
+        let s = simplify(&derivative);
+        // At x=1: sinh(1)
+        assert!((eval_at(&s, "x", 1.0) - 1.0_f64.sinh()).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_integrate_then_differentiate_cosh() {
+        // d/dx(∫cosh(x) dx) = cosh(x)
+        let expr = Expr::func("cosh", vec![Expr::var("x")]);
+        let integral = integrate(&expr, "x").unwrap();
+        let derivative = differentiate(&integral, "x").unwrap();
+        let s = simplify(&derivative);
+        // At x=1: cosh(1)
+        assert!((eval_at(&s, "x", 1.0) - 1.0_f64.cosh()).abs() < 1e-10);
     }
 
     #[test]

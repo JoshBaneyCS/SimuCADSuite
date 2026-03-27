@@ -141,6 +141,54 @@ pub fn differentiate(expr: &Expr, var: &str) -> Result<Expr, CasError> {
                     Expr::mul(Expr::num(2.0), Expr::func("sqrt", vec![inner.clone()])),
                 ),
 
+                // d/du sinh(u) = cosh(u)
+                "sinh" => Expr::func("cosh", vec![inner.clone()]),
+
+                // d/du cosh(u) = sinh(u)
+                "cosh" => Expr::func("sinh", vec![inner.clone()]),
+
+                // d/du tanh(u) = 1 / cosh(u)^2
+                "tanh" => Expr::div(
+                    Expr::num(1.0),
+                    Expr::pow(Expr::func("cosh", vec![inner.clone()]), Expr::num(2.0)),
+                ),
+
+                // d/du asinh(u) = 1 / sqrt(u^2 + 1)
+                "asinh" => Expr::div(
+                    Expr::num(1.0),
+                    Expr::func(
+                        "sqrt",
+                        vec![Expr::add(
+                            Expr::pow(inner.clone(), Expr::num(2.0)),
+                            Expr::num(1.0),
+                        )],
+                    ),
+                ),
+
+                // d/du acosh(u) = 1 / sqrt(u^2 - 1)
+                "acosh" => Expr::div(
+                    Expr::num(1.0),
+                    Expr::func(
+                        "sqrt",
+                        vec![Expr::sub(
+                            Expr::pow(inner.clone(), Expr::num(2.0)),
+                            Expr::num(1.0),
+                        )],
+                    ),
+                ),
+
+                // d/du atanh(u) = 1 / (1 - u^2)
+                "atanh" => Expr::div(
+                    Expr::num(1.0),
+                    Expr::sub(
+                        Expr::num(1.0),
+                        Expr::pow(inner.clone(), Expr::num(2.0)),
+                    ),
+                ),
+
+                // d/du abs(u) = sign(u)
+                "abs" => Expr::func("sign", vec![inner.clone()]),
+
                 _ => {
                     return Err(CasError::UnsupportedOperation(format!(
                         "differentiation of function '{}' is not supported",
@@ -300,6 +348,74 @@ mod tests {
         let e = Expr::pow(Expr::num(2.0), Expr::var("x"));
         let val = diff_eval(&e, "x", 0.0);
         assert!((val - 2.0_f64.ln()).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_diff_sinh() {
+        // d/dx(sinh(x)) = cosh(x), at x=0 → cosh(0) = 1
+        let e = Expr::func("sinh", vec![Expr::var("x")]);
+        let val = diff_eval(&e, "x", 0.0);
+        assert!((val - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_diff_cosh() {
+        // d/dx(cosh(x)) = sinh(x), at x=0 → sinh(0) = 0
+        let e = Expr::func("cosh", vec![Expr::var("x")]);
+        let val = diff_eval(&e, "x", 0.0);
+        assert!(val.abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_diff_tanh_numerically() {
+        // d/dx(tanh(x)) = 1/cosh²(x), verify numerically at x=0.5
+        let e = Expr::func("tanh", vec![Expr::var("x")]);
+        let val = diff_eval(&e, "x", 0.5);
+        let expected = 1.0 / (0.5_f64.cosh().powi(2));
+        assert!((val - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_diff_sinh_chain_rule() {
+        // d/dx(sinh(x²)) = cosh(x²) * 2x, verify numerically at x=1
+        let e = Expr::func("sinh", vec![Expr::pow(Expr::var("x"), Expr::num(2.0))]);
+        let val = diff_eval(&e, "x", 1.0);
+        let expected = 1.0_f64.cosh() * 2.0;
+        assert!((val - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_diff_asinh() {
+        // d/dx(asinh(x)) = 1/sqrt(x²+1), at x=0 → 1
+        let e = Expr::func("asinh", vec![Expr::var("x")]);
+        let val = diff_eval(&e, "x", 0.0);
+        assert!((val - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_diff_acosh() {
+        // d/dx(acosh(x)) = 1/sqrt(x²-1), at x=2 → 1/sqrt(3)
+        let e = Expr::func("acosh", vec![Expr::var("x")]);
+        let val = diff_eval(&e, "x", 2.0);
+        let expected = 1.0 / 3.0_f64.sqrt();
+        assert!((val - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_diff_atanh() {
+        // d/dx(atanh(x)) = 1/(1-x²), at x=0.5 → 1/(1-0.25) = 4/3
+        let e = Expr::func("atanh", vec![Expr::var("x")]);
+        let val = diff_eval(&e, "x", 0.5);
+        let expected = 1.0 / (1.0 - 0.25);
+        assert!((val - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_diff_abs() {
+        // d/dx(abs(x)) = sign(x), at x=3 → 1
+        let e = Expr::func("abs", vec![Expr::var("x")]);
+        let val = diff_eval(&e, "x", 3.0);
+        assert!((val - 1.0).abs() < 1e-10);
     }
 
     #[test]

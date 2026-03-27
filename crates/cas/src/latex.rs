@@ -80,6 +80,15 @@ pub fn to_latex(expr: &Expr) -> String {
                 "log" | "ln" => format!("\\ln\\left({}\\right)", joined),
                 "sqrt" => format!("\\sqrt{{{}}}", joined),
                 "abs" => format!("\\left|{}\\right|", joined),
+                "sinh" => format!("\\sinh\\left({}\\right)", joined),
+                "cosh" => format!("\\cosh\\left({}\\right)", joined),
+                "tanh" => format!("\\tanh\\left({}\\right)", joined),
+                "asinh" => format!("\\operatorname{{asinh}}\\left({}\\right)", joined),
+                "acosh" => format!("\\operatorname{{acosh}}\\left({}\\right)", joined),
+                "atanh" => format!("\\operatorname{{atanh}}\\left({}\\right)", joined),
+                "floor" => format!("\\lfloor {} \\rfloor", joined),
+                "ceil" => format!("\\lceil {} \\rceil", joined),
+                "sign" => format!("\\operatorname{{sgn}}\\left({}\\right)", joined),
                 _ => format!("\\mathrm{{{}}}\\left({}\\right)", name, joined),
             }
         }
@@ -274,6 +283,60 @@ mod tests {
     fn test_latex_arctan() {
         let e = Expr::func("atan", vec![Expr::var("x")]);
         assert_eq!(to_latex(&e), "\\arctan\\left(x\\right)");
+    }
+
+    #[test]
+    fn test_latex_sinh() {
+        let e = Expr::func("sinh", vec![Expr::var("x")]);
+        assert_eq!(to_latex(&e), "\\sinh\\left(x\\right)");
+    }
+
+    #[test]
+    fn test_latex_cosh() {
+        let e = Expr::func("cosh", vec![Expr::var("x")]);
+        assert_eq!(to_latex(&e), "\\cosh\\left(x\\right)");
+    }
+
+    #[test]
+    fn test_latex_tanh() {
+        let e = Expr::func("tanh", vec![Expr::var("x")]);
+        assert_eq!(to_latex(&e), "\\tanh\\left(x\\right)");
+    }
+
+    #[test]
+    fn test_latex_asinh() {
+        let e = Expr::func("asinh", vec![Expr::var("x")]);
+        assert_eq!(to_latex(&e), "\\operatorname{asinh}\\left(x\\right)");
+    }
+
+    #[test]
+    fn test_latex_acosh() {
+        let e = Expr::func("acosh", vec![Expr::var("x")]);
+        assert_eq!(to_latex(&e), "\\operatorname{acosh}\\left(x\\right)");
+    }
+
+    #[test]
+    fn test_latex_atanh() {
+        let e = Expr::func("atanh", vec![Expr::var("x")]);
+        assert_eq!(to_latex(&e), "\\operatorname{atanh}\\left(x\\right)");
+    }
+
+    #[test]
+    fn test_latex_floor() {
+        let e = Expr::func("floor", vec![Expr::var("x")]);
+        assert_eq!(to_latex(&e), "\\lfloor x \\rfloor");
+    }
+
+    #[test]
+    fn test_latex_ceil() {
+        let e = Expr::func("ceil", vec![Expr::var("x")]);
+        assert_eq!(to_latex(&e), "\\lceil x \\rceil");
+    }
+
+    #[test]
+    fn test_latex_sign() {
+        let e = Expr::func("sign", vec![Expr::var("x")]);
+        assert_eq!(to_latex(&e), "\\operatorname{sgn}\\left(x\\right)");
     }
 
     #[test]
