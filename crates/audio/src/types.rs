@@ -51,6 +51,66 @@ impl AudioSignal {
         self.samples.len() / self.channels as usize
     }
 
+    /// Return the total duration of the signal in seconds.
+    pub fn duration(&self) -> f64 {
+        self.duration_secs
+    }
+
+    /// Extract a portion of the signal between two sample indices.
+    ///
+    /// Indices are in terms of *frames* (per-channel samples). The returned
+    /// signal contains all channels within the specified range.
+    ///
+    /// If `end_sample` exceeds the frame count it is clamped.
+    pub fn slice(&self, start_sample: usize, end_sample: usize) -> AudioSignal {
+        let frames = self.frame_count();
+        let start = start_sample.min(frames);
+        let end = end_sample.min(frames);
+        if start >= end {
+            return AudioSignal::new(Vec::new(), self.sample_rate, self.channels);
+        }
+
+        let ch = self.channels as usize;
+        let new_samples = self.samples[start * ch..end * ch].to_vec();
+        AudioSignal::new(new_samples, self.sample_rate, self.channels)
+    }
+
+    /// Resample the signal to `target_rate` using linear interpolation.
+    ///
+    /// This is a basic resampler suitable for quick previews and analysis;
+    /// for production quality consider a polyphase or sinc-based resampler.
+    pub fn resample(&self, target_rate: u32) -> AudioSignal {
+        if target_rate == self.sample_rate || self.samples.is_empty() || self.sample_rate == 0 {
+            return self.clone();
+        }
+
+        let ch = self.channels as usize;
+        let src_frames = self.frame_count();
+        let ratio = target_rate as f64 / self.sample_rate as f64;
+        let dst_frames = (src_frames as f64 * ratio).round() as usize;
+
+        if dst_frames == 0 {
+            return AudioSignal::new(Vec::new(), target_rate, self.channels);
+        }
+
+        let mut out = Vec::with_capacity(dst_frames * ch);
+
+        for f in 0..dst_frames {
+            let src_pos = f as f64 / ratio;
+            let idx0 = (src_pos.floor() as usize).min(src_frames - 1);
+            let idx1 = (idx0 + 1).min(src_frames - 1);
+            let frac = src_pos - idx0 as f64;
+
+            for c in 0..ch {
+                let s0 = self.samples[idx0 * ch + c];
+                let s1 = self.samples[idx1 * ch + c];
+                out.push(s0 + frac * (s1 - s0));
+            }
+        }
+
+        AudioSignal::new(out, target_rate, self.channels)
+    }
+
     /// Mix the signal down to mono by averaging across channels.
     ///
     /// If the signal is already mono the original samples are returned
@@ -163,6 +223,75 @@ mod tests {
         let signal = AudioSignal::new(vec![0.5; 100], 44100, 1);
         let mono = signal.to_mono();
         assert_eq!(mono.samples.len(), 100);
+    }
+
+    #[test]
+    fn duration_method() {
+        let signal = AudioSignal::new(vec![0.0; 44100], 44100, 1);
+        assert!((signal.duration() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn slice_extracts_range() {
+        let samples: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let signal = AudioSignal::new(samples, 44100, 1);
+        let sliced = signal.slice(10, 20);
+        assert_eq!(sliced.frame_count(), 10);
+        assert!((sliced.samples[0] - 10.0).abs() < 1e-12);
+        assert!((sliced.samples[9] - 19.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn slice_clamped_range() {
+        let signal = AudioSignal::new(vec![1.0; 50], 44100, 1);
+        let sliced = signal.slice(40, 1000);
+        assert_eq!(sliced.frame_count(), 10);
+    }
+
+    #[test]
+    fn slice_empty_when_start_ge_end() {
+        let signal = AudioSignal::new(vec![1.0; 50], 44100, 1);
+        let sliced = signal.slice(30, 10);
+        assert_eq!(sliced.frame_count(), 0);
+    }
+
+    #[test]
+    fn slice_stereo() {
+        // Stereo: [L0, R0, L1, R1, ...]
+        let samples: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        let signal = AudioSignal::new(samples, 44100, 2);
+        assert_eq!(signal.frame_count(), 10);
+        let sliced = signal.slice(2, 5);
+        assert_eq!(sliced.frame_count(), 3);
+        assert_eq!(sliced.channels, 2);
+        // Frame 2 starts at index 4 in original => samples [4.0, 5.0]
+        assert!((sliced.samples[0] - 4.0).abs() < 1e-12);
+        assert!((sliced.samples[1] - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn resample_same_rate_is_clone() {
+        let signal = AudioSignal::new(vec![1.0; 100], 44100, 1);
+        let resampled = signal.resample(44100);
+        assert_eq!(resampled.samples.len(), 100);
+    }
+
+    #[test]
+    fn resample_double_rate() {
+        let signal = AudioSignal::new(vec![0.0, 1.0, 0.0, -1.0], 4, 1);
+        let resampled = signal.resample(8);
+        // Should roughly double the number of frames
+        assert_eq!(resampled.frame_count(), 8);
+        assert_eq!(resampled.sample_rate, 8);
+    }
+
+    #[test]
+    fn resample_half_rate() {
+        let samples: Vec<f64> = (0..100).map(|i| (i as f64 * 0.01).sin()).collect();
+        let signal = AudioSignal::new(samples, 1000, 1);
+        let resampled = signal.resample(500);
+        assert_eq!(resampled.frame_count(), 50);
+        assert_eq!(resampled.sample_rate, 500);
     }
 
     #[test]
