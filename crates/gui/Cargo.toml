@@ -16,7 +16,6 @@ simucad-audio = { path = "../audio", optional = true }
 eframe.workspace = true
 egui.workspace = true
 egui_plot.workspace = true
-wgpu.workspace = true
 bytemuck.workspace = true
 tracing.workspace = true
 serde.workspace = true

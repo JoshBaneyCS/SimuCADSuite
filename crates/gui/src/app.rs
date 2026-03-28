@@ -71,7 +71,21 @@ pub struct SimuApp {
 impl SimuApp {
     /// Create a new application instance, optionally restoring persisted
     /// state from the [`eframe::CreationContext`].
-    pub fn new(_cc: &eframe::CreationContext, settings: AppSettings) -> Self {
+    pub fn new(cc: &eframe::CreationContext, settings: AppSettings) -> Self {
+        // Initialize 3D renderer if wgpu backend is available.
+        if let Some(render_state) = cc.wgpu_render_state.as_ref() {
+            let resources = crate::renderer_3d::Renderer3DResources::new(
+                &render_state.device,
+                render_state.target_format,
+            );
+            render_state
+                .renderer
+                .write()
+                .callback_resources
+                .insert(resources);
+            tracing::info!("3D renderer initialized (wgpu)");
+        }
+
         Self {
             current_page: Page::Home,
             settings,

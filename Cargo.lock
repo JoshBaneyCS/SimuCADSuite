@@ -991,6 +991,7 @@ dependencies = [
  "objc2-foundation 0.2.2",
  "parking_lot",
  "percent-encoding",
+ "pollster",
  "profiling",
  "raw-window-handle",
  "static_assertions",
@@ -998,6 +999,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "web-time",
+ "wgpu 23.0.1",
  "winapi",
  "windows-sys 0.59.0",
  "winit",
@@ -3295,6 +3297,7 @@ dependencies = [
 name = "simucad-gui"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "eframe",
  "egui",
  "egui_plot",
@@ -4316,6 +4319,7 @@ dependencies = [
  "document-features",
  "js-sys",
  "log",
+ "naga 23.1.0",
  "parking_lot",
  "profiling",
  "raw-window-handle",
@@ -4415,6 +4419,7 @@ dependencies = [
  "arrayvec",
  "ash",
  "bitflags 2.11.0",
+ "block",
  "bytemuck",
  "cfg_aliases 0.1.1",
  "core-graphics-types",
