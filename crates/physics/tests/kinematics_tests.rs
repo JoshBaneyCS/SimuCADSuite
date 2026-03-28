@@ -9,6 +9,7 @@ use std::f64::consts::FRAC_PI_4;
 use simucad_core::constants::STANDARD_GRAVITY;
 use simucad_core::types::SimulationConfig;
 use simucad_physics::drag::{DragModel, DragShape};
+use simucad_physics::integrator::EulerIntegrator;
 use simucad_physics::kinematics::{drag_trajectory, vacuum_trajectory};
 use simucad_physics::sweep::{
     execute_sweep, IntegratorChoice, ParameterSweep, SweepConfig,
@@ -101,7 +102,7 @@ fn drag_trajectory_reduces_range_compared_to_vacuum() {
     let drag_model = DragModel::at_sea_level(DragShape::Sphere, 0.01);
     let mass = 1.0;
     let with_drag =
-        drag_trajectory(v0, angle, G, &drag_model, mass, 0.0, &config).unwrap();
+        drag_trajectory(v0, angle, G, &drag_model, mass, 0.0, &config, &EulerIntegrator::new()).unwrap();
 
     // Drag should reduce range
     assert!(

@@ -8,6 +8,7 @@ use egui::Ui;
 use simucad_core::export::{trajectory_to_table, DataTable};
 use simucad_core::types::{SimulationConfig, Trajectory, TrajectoryPoint};
 use simucad_physics::drag::{DragModel, DragShape};
+use simucad_physics::integrator::{AdaptiveRK45Integrator, EulerIntegrator, Integrator, RK4Integrator};
 use simucad_physics::kinematics;
 use simucad_physics::trajectory::sample_trajectory;
 
@@ -33,6 +34,8 @@ pub struct KinematicsPanel {
     pub initial_height: f64,
     /// Shape used for the drag coefficient.
     pub drag_shape: DragShape,
+    /// Numerical integrator for drag trajectory.
+    pub integrator_choice: IntegratorChoice,
 
     /// Computed vacuum trajectory (filled on "Calculate").
     pub vacuum_trajectory: Option<Trajectory>,
@@ -60,6 +63,7 @@ impl Default for KinematicsPanel {
             area: 0.01,
             initial_height: 0.0,
             drag_shape: DragShape::Sphere,
+            integrator_choice: IntegratorChoice::RK4,
             vacuum_trajectory: None,
             drag_trajectory: None,
             vacuum_samples: Vec::new(),
@@ -69,6 +73,32 @@ impl Default for KinematicsPanel {
             show_csv: false,
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Integrator choice
+// ---------------------------------------------------------------------------
+
+/// Selection of numerical integrator for the drag trajectory solver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntegratorChoice {
+    Euler,
+    RK4,
+    AdaptiveRK45,
+}
+
+const INTEGRATOR_CHOICES: &[(IntegratorChoice, &str)] = &[
+    (IntegratorChoice::Euler, "Euler (1st order)"),
+    (IntegratorChoice::RK4, "RK4 (4th order)"),
+    (IntegratorChoice::AdaptiveRK45, "Adaptive RK4-5"),
+];
+
+fn integrator_label(choice: IntegratorChoice) -> &'static str {
+    INTEGRATOR_CHOICES
+        .iter()
+        .find(|(c, _)| *c == choice)
+        .map(|(_, label)| *label)
+        .unwrap_or("Unknown")
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +176,16 @@ impl KinematicsPanel {
                     .show_ui(ui, |ui| {
                         for (shape, label) in DRAG_SHAPES {
                             ui.selectable_value(&mut self.drag_shape, *shape, *label);
+                        }
+                    });
+                ui.end_row();
+
+                ui.label("Integrator:");
+                egui::ComboBox::from_id_salt("integrator")
+                    .selected_text(integrator_label(self.integrator_choice))
+                    .show_ui(ui, |ui| {
+                        for (choice, label) in INTEGRATOR_CHOICES {
+                            ui.selectable_value(&mut self.integrator_choice, *choice, *label);
                         }
                     });
                 ui.end_row();
@@ -328,6 +368,12 @@ impl KinematicsPanel {
             ..SimulationConfig::default()
         };
 
+        let integrator: Box<dyn Integrator> = match self.integrator_choice {
+            IntegratorChoice::Euler => Box::new(EulerIntegrator::new()),
+            IntegratorChoice::RK4 => Box::new(RK4Integrator::new()),
+            IntegratorChoice::AdaptiveRK45 => Box::new(AdaptiveRK45Integrator::new(1e-6)),
+        };
+
         match kinematics::drag_trajectory(
             self.velocity,
             angle_rad,
@@ -336,6 +382,7 @@ impl KinematicsPanel {
             self.mass,
             self.initial_height,
             &config,
+            &*integrator,
         ) {
             Ok(traj) => {
                 self.drag_samples = sample_trajectory(&traj, 25);
