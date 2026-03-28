@@ -8,9 +8,10 @@
 
 #![cfg(feature = "audio")]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use egui::Ui;
+use simucad_core::export::DataTable;
 use simucad_audio::fft::{compute_fft, compute_power_spectrum};
 use simucad_audio::spectral::{compute_rms, compute_spectral_features, compute_zero_crossing_rate};
 use simucad_audio::stft::compute_stft;
@@ -51,6 +52,7 @@ pub struct AudioPanel {
     stft_hop_size: usize,
     status: String,
     waveform_points: Vec<(f64, f64)>,
+    export_path: String,
 }
 
 impl Default for AudioPanel {
@@ -71,6 +73,7 @@ impl Default for AudioPanel {
             stft_hop_size: 512,
             status: String::new(),
             waveform_points: Vec::new(),
+            export_path: "audio_analysis".into(),
         }
     }
 }
@@ -130,6 +133,8 @@ impl AudioPanel {
         self.show_spectrum_plot(ui);
         ui.add_space(8.0);
         self.show_spectral_features(ui);
+        ui.add_space(8.0);
+        self.show_export_controls(ui);
         ui.add_space(8.0);
         self.show_spectrogram(ui);
     }
@@ -339,6 +344,97 @@ impl AudioPanel {
                 ui.label(format!("{:.4}", feat.total_energy));
                 ui.end_row();
             });
+    }
+
+    // -- Export controls -----------------------------------------------------
+
+    fn show_export_controls(&mut self, ui: &mut Ui) {
+        let has_data = self.spectrum.is_some() || !self.waveform_points.is_empty();
+        if !has_data {
+            return;
+        }
+
+        ui.strong("Export");
+        ui.horizontal(|ui| {
+            ui.label("Export path:");
+            ui.text_edit_singleline(&mut self.export_path);
+            if ui.button("Save CSV").clicked() {
+                self.export_audio_csv();
+            }
+            if ui.button("Save XLSX").clicked() {
+                self.export_audio_xlsx();
+            }
+            if self.spectral_features.is_some() {
+                if ui.button("Save Features JSON").clicked() {
+                    self.export_features_json();
+                }
+            }
+        });
+    }
+
+    fn export_audio_csv(&mut self) {
+        let tables = self.collect_audio_tables();
+        if tables.is_empty() {
+            return;
+        }
+        // Write first table (spectrum) as CSV.
+        let path = PathBuf::from(format!("{}.csv", self.export_path));
+        match tables[0].write_csv(&path) {
+            Ok(()) => self.status = format!("Saved to {}", path.display()),
+            Err(e) => self.status = format!("CSV error: {e}"),
+        }
+    }
+
+    fn export_audio_xlsx(&mut self) {
+        let tables = self.collect_audio_tables();
+        if tables.is_empty() {
+            return;
+        }
+        let path = PathBuf::from(format!("{}.xlsx", self.export_path));
+        match simucad_core::export::write_tables_xlsx(&tables, &path) {
+            Ok(()) => self.status = format!("Saved to {}", path.display()),
+            Err(e) => self.status = format!("XLSX error: {e}"),
+        }
+    }
+
+    fn export_features_json(&mut self) {
+        let Some(ref features) = self.spectral_features else {
+            return;
+        };
+        let path = PathBuf::from(format!("{}_features.json", self.export_path));
+        match simucad_core::export::write_json(features, &path) {
+            Ok(()) => self.status = format!("Saved to {}", path.display()),
+            Err(e) => self.status = format!("JSON error: {e}"),
+        }
+    }
+
+    fn collect_audio_tables(&self) -> Vec<DataTable> {
+        let mut tables = Vec::new();
+
+        // Spectrum table.
+        if let Some(ref spectrum) = self.spectrum {
+            let freq_res = spectrum.frequency_resolution();
+            let n = self.power_spectrum_db.len();
+            let freqs: Vec<f64> = (0..n).map(|i| i as f64 * freq_res).collect();
+
+            let mut table = DataTable::new("Spectrum");
+            table.add_column("frequency", "Hz", freqs);
+            table.add_column("magnitude_db", "dB", self.power_spectrum_db.clone());
+            tables.push(table);
+        }
+
+        // Waveform table.
+        if !self.waveform_points.is_empty() {
+            let times: Vec<f64> = self.waveform_points.iter().map(|&(t, _)| t).collect();
+            let amps: Vec<f64> = self.waveform_points.iter().map(|&(_, a)| a).collect();
+
+            let mut table = DataTable::new("Waveform");
+            table.add_column("time", "s", times);
+            table.add_column("amplitude", "", amps);
+            tables.push(table);
+        }
+
+        tables
     }
 
     // -- Spectrogram ---------------------------------------------------------

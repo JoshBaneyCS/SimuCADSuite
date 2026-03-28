@@ -9,8 +9,11 @@ description = "Core types, units, settings, constants, and error hierarchy for S
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 toml.workspace = true
 tracing.workspace = true
 nalgebra.workspace = true
+csv.workspace = true
+rust_xlsxwriter.workspace = true
 
 [dev-dependencies]

@@ -4,8 +4,10 @@
 //! drag trajectories using the physics crate solvers. Results include plots,
 //! summary statistics, sampled-point tables, and CSV export.
 
+use std::path::PathBuf;
+
 use egui::Ui;
-use simucad_core::export::{trajectory_to_table, DataTable};
+use simucad_core::export::{trajectory_to_table, write_tables_xlsx, DataTable};
 use simucad_core::types::{SimulationConfig, Trajectory, TrajectoryPoint};
 use simucad_physics::drag::{DragModel, DragShape};
 use simucad_physics::integrator::{AdaptiveRK45Integrator, EulerIntegrator, Integrator, RK4Integrator};
@@ -51,6 +53,8 @@ pub struct KinematicsPanel {
     pub csv_output: String,
     /// Whether the CSV output area is visible.
     pub show_csv: bool,
+    /// Export file path.
+    pub export_path: String,
 }
 
 impl Default for KinematicsPanel {
@@ -71,6 +75,7 @@ impl Default for KinematicsPanel {
             error_message: None,
             csv_output: String::new(),
             show_csv: false,
+            export_path: "trajectory".into(),
         }
     }
 }
@@ -199,11 +204,26 @@ impl KinematicsPanel {
             }
 
             if self.vacuum_trajectory.is_some() || self.drag_trajectory.is_some() {
-                if ui.button("Export CSV").clicked() {
+                if ui.button("Show CSV").clicked() {
                     self.export_csv();
                 }
             }
         });
+
+        // File export controls.
+        if self.vacuum_trajectory.is_some() || self.drag_trajectory.is_some() {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label("Export path:");
+                ui.text_edit_singleline(&mut self.export_path);
+                if ui.button("Save CSV").clicked() {
+                    self.save_csv_file();
+                }
+                if ui.button("Save XLSX").clicked() {
+                    self.save_xlsx_file();
+                }
+            });
+        }
 
         if let Some(ref err) = self.error_message {
             ui.add_space(4.0);
@@ -391,6 +411,61 @@ impl KinematicsPanel {
             Err(e) => {
                 self.error_message = Some(format!("Drag trajectory error: {e}"));
             }
+        }
+    }
+
+    /// Collect trajectory tables for export.
+    fn collect_tables(&self) -> Vec<DataTable> {
+        let mut tables = Vec::new();
+        if let Some(ref vac) = self.vacuum_trajectory {
+            tables.push(trajectory_to_table(vac, "Vacuum"));
+        }
+        if let Some(ref drg) = self.drag_trajectory {
+            tables.push(trajectory_to_table(drg, "Drag"));
+        }
+        tables
+    }
+
+    /// Save trajectories to a CSV file.
+    fn save_csv_file(&mut self) {
+        let tables = self.collect_tables();
+        if tables.is_empty() {
+            return;
+        }
+
+        let path = PathBuf::from(format!("{}.csv", self.export_path));
+        // Concatenate all tables into one CSV string.
+        let mut combined = String::new();
+        for table in &tables {
+            match table.to_csv() {
+                Ok(csv) => {
+                    combined.push_str(&format!("# {}\n", table.title));
+                    combined.push_str(&csv);
+                    combined.push('\n');
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("CSV error: {e}"));
+                    return;
+                }
+            }
+        }
+        match std::fs::write(&path, combined) {
+            Ok(()) => self.error_message = Some(format!("Saved to {}", path.display())),
+            Err(e) => self.error_message = Some(format!("Write failed: {e}")),
+        }
+    }
+
+    /// Save trajectories to an XLSX file.
+    fn save_xlsx_file(&mut self) {
+        let tables = self.collect_tables();
+        if tables.is_empty() {
+            return;
+        }
+
+        let path = PathBuf::from(format!("{}.xlsx", self.export_path));
+        match write_tables_xlsx(&tables, &path) {
+            Ok(()) => self.error_message = Some(format!("Saved to {}", path.display())),
+            Err(e) => self.error_message = Some(format!("XLSX error: {e}")),
         }
     }
 

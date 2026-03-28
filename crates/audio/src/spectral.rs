@@ -5,10 +5,12 @@
 //! flatness, zero-crossing rate, RMS energy, peak frequency, and total
 //! energy.
 
+use serde::{Deserialize, Serialize};
+
 use crate::types::Spectrum;
 
 /// Spectral analysis results computed from a single spectrum frame.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SpectralFeatures {
     /// Centre of mass of the spectrum (Hz).
     pub spectral_centroid: f64,
