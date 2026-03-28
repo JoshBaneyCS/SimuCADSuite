@@ -4,15 +4,18 @@
 //! running a background particle-based fluid simulation with progress
 //! reporting and cancellation.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use egui::Ui;
 use simucad_core::progress::ProgressReporter;
 use simucad_core::types::Vec3;
 use simucad_mesh::io::{GmshLoader, MeshLoader};
+use simucad_mesh::types::{ElementType, Mesh};
 use simucad_physics::fluid::ParticleSystem;
 
 use crate::task::{TaskRunner, TaskStatus};
+use crate::viewport_3d::Viewport3D;
 
 // ---------------------------------------------------------------------------
 // Simulation result
@@ -27,6 +30,10 @@ pub struct FluidResult {
     pub mesh_element_count: usize,
     pub steps_completed: usize,
     pub velocity_magnitude: f64,
+    /// Downsampled particle data for 3D visualization: (x, y, z, speed).
+    pub particle_viz: Vec<(f64, f64, f64, f64)>,
+    /// Mesh wireframe edges for 3D visualization: (start, end).
+    pub mesh_edges: Vec<([f64; 3], [f64; 3])>,
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +67,8 @@ pub struct FluidPanel {
     pub last_result: Option<FluidResult>,
     /// Log of status messages.
     pub log_messages: Vec<String>,
+    /// 3D viewport for particle/mesh visualization.
+    pub viewport: Viewport3D,
 }
 
 impl Default for FluidPanel {
@@ -77,6 +86,7 @@ impl Default for FluidPanel {
             progress: None,
             last_result: None,
             log_messages: Vec::new(),
+            viewport: Viewport3D::default(),
         }
     }
 }
@@ -97,6 +107,7 @@ impl FluidPanel {
         ui.add_space(12.0);
         self.show_status(ui);
         self.show_results(ui);
+        self.show_3d_viewport(ui);
     }
 
     fn show_inputs(&mut self, ui: &mut Ui) {
@@ -278,6 +289,27 @@ impl FluidPanel {
         }
     }
 
+    fn show_3d_viewport(&mut self, ui: &mut Ui) {
+        if let Some(ref res) = self.last_result {
+            ui.add_space(12.0);
+            ui.separator();
+            ui.strong("3D Visualization");
+            ui.add_space(4.0);
+
+            let particles = if res.particle_viz.is_empty() {
+                None
+            } else {
+                Some(res.particle_viz.as_slice())
+            };
+            let edges = if res.mesh_edges.is_empty() {
+                None
+            } else {
+                Some(res.mesh_edges.as_slice())
+            };
+            self.viewport.show(ui, particles, edges);
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Mesh loading
     // -----------------------------------------------------------------------
@@ -366,6 +398,21 @@ impl FluidPanel {
             let particles_in_bounds = system.particles_in_bounds();
             let vel_mag = velocity.magnitude();
 
+            // Extract particle data for 3D visualization (downsample to 100K).
+            let all_particles = &system.particles;
+            let step_viz = (all_particles.len() / 100_000).max(1);
+            let particle_viz: Vec<(f64, f64, f64, f64)> = all_particles
+                .iter()
+                .step_by(step_viz)
+                .map(|p| {
+                    let speed = p.velocity.magnitude();
+                    (p.position.x, p.position.y, p.position.z, speed)
+                })
+                .collect();
+
+            // Extract mesh wireframe edges.
+            let mesh_edges = extract_mesh_edges(&mesh);
+
             Ok(FluidResult {
                 particle_count: system.particle_count(),
                 particles_in_bounds,
@@ -373,7 +420,52 @@ impl FluidPanel {
                 mesh_element_count,
                 steps_completed: num_steps,
                 velocity_magnitude: vel_mag,
+                particle_viz,
+                mesh_edges,
             })
         });
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Extract unique wireframe edges from a mesh for 3D rendering.
+fn extract_mesh_edges(mesh: &Mesh) -> Vec<([f64; 3], [f64; 3])> {
+    let mut edge_set: HashSet<(usize, usize)> = HashSet::new();
+    let mut edges = Vec::new();
+
+    for elem in &mesh.elements {
+        let idx = &elem.node_indices;
+        let element_edges: Vec<(usize, usize)> = match elem.element_type {
+            ElementType::Line2 => {
+                vec![(idx[0], idx[1])]
+            }
+            ElementType::Triangle3 => {
+                vec![(idx[0], idx[1]), (idx[1], idx[2]), (idx[2], idx[0])]
+            }
+            ElementType::Tetrahedron4 => {
+                vec![
+                    (idx[0], idx[1]),
+                    (idx[0], idx[2]),
+                    (idx[0], idx[3]),
+                    (idx[1], idx[2]),
+                    (idx[1], idx[3]),
+                    (idx[2], idx[3]),
+                ]
+            }
+        };
+
+        for (a, b) in element_edges {
+            let key = if a < b { (a, b) } else { (b, a) };
+            if edge_set.insert(key) {
+                let na = mesh.nodes[a];
+                let nb = mesh.nodes[b];
+                edges.push(([na.x, na.y, na.z], [nb.x, nb.y, nb.z]));
+            }
+        }
+    }
+
+    edges
 }

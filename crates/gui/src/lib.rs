@@ -2,9 +2,12 @@ pub mod app;
 #[cfg(feature = "audio")]
 pub mod audio_ui;
 pub mod calculator_ui;
+pub mod camera;
 pub mod fluid_ui;
 pub mod home;
 pub mod kinematics_ui;
 pub mod plotting;
+pub mod renderer_3d;
 pub mod settings_ui;
 pub mod task;
+pub mod viewport_3d;
