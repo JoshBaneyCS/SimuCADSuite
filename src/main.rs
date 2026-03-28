@@ -28,6 +28,7 @@ fn main() -> Result<()> {
 
     // Configure eframe native options
     let native_options = eframe::NativeOptions {
+        renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_title("SimuCADSuite")
             .with_inner_size([1280.0, 800.0])

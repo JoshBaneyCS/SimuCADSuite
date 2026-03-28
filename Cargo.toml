@@ -38,7 +38,7 @@ pollster = "0.4"
 nom = "7"
 
 # GUI
-eframe = "0.30"
+eframe = { version = "0.30", features = ["wgpu"] }
 egui = "0.30"
 egui_plot = "0.30"
 
