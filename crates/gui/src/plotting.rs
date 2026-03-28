@@ -60,19 +60,64 @@ pub fn plot_trajectories(
 
 /// Plot a set of (x, y) data points as a single curve.
 pub fn plot_function_2d(ui: &mut Ui, points: &[(f64, f64)], label: &str) {
+    plot_function_2d_ex(ui, points, label, false);
+}
+
+/// Plot a set of (x, y) data points as a single curve, with optional equal
+/// aspect ratio (useful for polar plots).
+pub fn plot_function_2d_ex(
+    ui: &mut Ui,
+    points: &[(f64, f64)],
+    label: &str,
+    equal_aspect: bool,
+) {
     let plot_points: PlotPoints = points.iter().map(|&(x, y)| [x, y]).collect();
 
     let line = Line::new(plot_points)
         .name(label)
         .color(egui::Color32::from_rgb(100, 200, 100));
 
-    Plot::new("function_plot")
+    let mut plot = Plot::new(egui::Id::new(label).with("fn_plot"))
         .legend(Legend::default())
         .x_axis_label("x")
         .y_axis_label("f(x)")
+        .height(300.0);
+
+    if equal_aspect {
+        plot = plot.data_aspect(1.0);
+    }
+
+    plot.show(ui, |plot_ui| {
+        plot_ui.line(line);
+    });
+}
+
+/// Plot two functions overlaid on the same axes.
+pub fn plot_two_functions(
+    ui: &mut Ui,
+    points_a: &[(f64, f64)],
+    label_a: &str,
+    points_b: &[(f64, f64)],
+    label_b: &str,
+) {
+    let pp_a: PlotPoints = points_a.iter().map(|&(x, y)| [x, y]).collect();
+    let pp_b: PlotPoints = points_b.iter().map(|&(x, y)| [x, y]).collect();
+
+    let line_a = Line::new(pp_a)
+        .name(label_a)
+        .color(egui::Color32::from_rgb(100, 200, 100));
+    let line_b = Line::new(pp_b)
+        .name(label_b)
+        .color(egui::Color32::from_rgb(255, 150, 50));
+
+    Plot::new("overlay_plot")
+        .legend(Legend::default())
+        .x_axis_label("x")
+        .y_axis_label("y")
         .height(300.0)
         .show(ui, |plot_ui| {
-            plot_ui.line(line);
+            plot_ui.line(line_a);
+            plot_ui.line(line_b);
         });
 }
 

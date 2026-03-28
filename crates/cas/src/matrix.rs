@@ -331,6 +331,145 @@ impl Matrix {
         // Multiply each element by 1/det.
         Ok(adjugate.scalar_mul(&simplify(&inv_det)))
     }
+
+    // -----------------------------------------------------------------------
+    // Advanced symbolic operations
+    // -----------------------------------------------------------------------
+
+    /// Compute the trace of a square matrix (sum of diagonal elements).
+    pub fn trace(&self) -> Result<Expr, CasError> {
+        if self.rows != self.cols {
+            return Err(CasError::DomainError(
+                "Trace is only defined for square matrices".into(),
+            ));
+        }
+        let mut result = Expr::num(0.0);
+        for i in 0..self.rows {
+            result = Expr::add(result, self.data[i][i].clone());
+        }
+        Ok(simplify(&result))
+    }
+
+    /// Compute the characteristic polynomial `det(A - λI)` as an expression
+    /// in `lambda_var`.
+    ///
+    /// The result is a polynomial expression whose roots are the eigenvalues.
+    pub fn characteristic_polynomial(
+        &self,
+        lambda_var: &str,
+    ) -> Result<Expr, CasError> {
+        if self.rows != self.cols {
+            return Err(CasError::DomainError(
+                "Characteristic polynomial requires a square matrix".into(),
+            ));
+        }
+        let n = self.rows;
+
+        // Build A - λI
+        let mut data = self.data.clone();
+        for i in 0..n {
+            data[i][i] = simplify(&Expr::sub(
+                data[i][i].clone(),
+                Expr::var(lambda_var),
+            ));
+        }
+        let m = Matrix {
+            rows: n,
+            cols: n,
+            data,
+        };
+        let det = m.determinant()?;
+        Ok(simplify(&det))
+    }
+
+    /// Compute eigenvalues numerically by finding roots of the
+    /// characteristic polynomial.
+    ///
+    /// Only reliable for small matrices (up to ~4×4). Returns eigenvalues as
+    /// `f64` values found via root-finding in the given search range.
+    pub fn eigenvalues_numeric(
+        &self,
+        search_min: f64,
+        search_max: f64,
+        resolution: usize,
+    ) -> Result<Vec<f64>, CasError> {
+        let char_poly = self.characteristic_polynomial("lambda")?;
+        crate::solver::find_roots(&char_poly, "lambda", search_min, search_max, resolution)
+    }
+
+    /// Evaluate every element of the matrix numerically, returning a matrix
+    /// of `f64` values.
+    pub fn evaluate_numeric(
+        &self,
+        env: &Environment,
+    ) -> Result<Vec<Vec<f64>>, CasError> {
+        let mut result = Vec::with_capacity(self.rows);
+        for row in &self.data {
+            let mut numeric_row = Vec::with_capacity(self.cols);
+            for elem in row {
+                numeric_row.push(evaluate(elem, env)?);
+            }
+            result.push(numeric_row);
+        }
+        Ok(result)
+    }
+
+    /// Raise a square matrix to a non-negative integer power.
+    ///
+    /// `A^0 = I`, `A^1 = A`, `A^n = A * A^(n-1)`.
+    pub fn pow(&self, n: usize) -> Result<Matrix, CasError> {
+        if self.rows != self.cols {
+            return Err(CasError::DomainError(
+                "Matrix power requires a square matrix".into(),
+            ));
+        }
+        if n == 0 {
+            return Ok(Matrix::identity(self.rows));
+        }
+        let mut result = self.clone();
+        for _ in 1..n {
+            result = result.mul(self)?;
+        }
+        Ok(result)
+    }
+
+    /// Apply `simplify` to every element of the matrix.
+    pub fn simplify_all(&self) -> Matrix {
+        let data = self
+            .data
+            .iter()
+            .map(|row| row.iter().map(|e| simplify(e)).collect())
+            .collect();
+        Matrix {
+            rows: self.rows,
+            cols: self.cols,
+            data,
+        }
+    }
+
+    /// Differentiate every element of the matrix with respect to `var`.
+    pub fn differentiate(
+        &self,
+        var: &str,
+    ) -> Result<Matrix, CasError> {
+        let data: Result<Vec<Vec<Expr>>, CasError> = self
+            .data
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|e| {
+                        let d = crate::derivative::differentiate(e, var)?;
+                        Ok(simplify(&d))
+                    })
+                    .collect()
+            })
+            .collect();
+        Ok(Matrix {
+            rows: self.rows,
+            cols: self.cols,
+            data: data?,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
