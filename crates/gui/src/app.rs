@@ -14,6 +14,7 @@ use crate::calculator_ui::CalculatorPanel;
 use crate::fluid_ui::FluidPanel;
 use crate::home;
 use crate::kinematics_ui::KinematicsPanel;
+use crate::mesh_ui::MeshPanel;
 use crate::settings_ui;
 
 #[cfg(feature = "audio")]
@@ -30,6 +31,7 @@ pub enum Page {
     Kinematics,
     FluidDynamics,
     Calculator,
+    MeshViewer,
     AudioAnalyzer,
     Settings,
 }
@@ -42,6 +44,7 @@ impl Page {
             Page::Kinematics => "Projectile Motion",
             Page::FluidDynamics => "Fluid Dynamics",
             Page::Calculator => "Scientific Calculator",
+            Page::MeshViewer => "Mesh Viewer",
             Page::AudioAnalyzer => "Audio Analyzer",
             Page::Settings => "Settings",
         }
@@ -64,6 +67,8 @@ pub struct SimuApp {
     pub fluid_panel: FluidPanel,
     /// Calculator panel state.
     pub calculator_panel: CalculatorPanel,
+    /// Mesh viewer panel state.
+    pub mesh_panel: MeshPanel,
     /// Audio analyzer panel state.
     #[cfg(feature = "audio")]
     pub audio_panel: AudioPanel,
@@ -99,6 +104,7 @@ impl SimuApp {
             kinematics_panel: KinematicsPanel::default(),
             fluid_panel: FluidPanel::default(),
             calculator_panel: CalculatorPanel::default(),
+            mesh_panel: MeshPanel::default(),
             #[cfg(feature = "audio")]
             audio_panel: AudioPanel::default(),
             settings_open: false,
@@ -257,6 +263,7 @@ impl eframe::App for SimuApp {
                             Page::Kinematics,
                             Page::FluidDynamics,
                             Page::Calculator,
+                            Page::MeshViewer,
                         ];
                         #[cfg(feature = "audio")]
                         pages.push(Page::AudioAnalyzer);
@@ -338,6 +345,9 @@ impl eframe::App for SimuApp {
                 }
                 Page::Calculator => {
                     self.calculator_panel.show(ui);
+                }
+                Page::MeshViewer => {
+                    self.mesh_panel.show(ui);
                 }
                 Page::AudioAnalyzer => {
                     #[cfg(feature = "audio")]

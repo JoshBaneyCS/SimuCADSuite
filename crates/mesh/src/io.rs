@@ -131,6 +131,37 @@ impl MeshLoader for StlLoader {
 }
 
 // ---------------------------------------------------------------------------
+// ObjLoader — Wavefront OBJ files
+// ---------------------------------------------------------------------------
+
+/// Loader for Wavefront OBJ files.
+pub struct ObjLoader;
+
+impl MeshLoader for ObjLoader {
+    fn load(path: &Path) -> Result<Mesh, MeshError> {
+        info!("Loading OBJ mesh from {}", path.display());
+
+        let contents = fs::read_to_string(path)?;
+        let mesh = crate::obj::parse_obj(&contents)?;
+
+        debug!(
+            "Parsed OBJ mesh: {} nodes, {} elements",
+            mesh.node_count(),
+            mesh.element_count(),
+        );
+
+        validate_mesh(&mesh)?;
+        info!("OBJ mesh validated successfully");
+
+        Ok(mesh)
+    }
+
+    fn save(mesh: &Mesh, path: &Path) -> Result<(), MeshError> {
+        crate::obj::write_obj(mesh, path)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

@@ -47,6 +47,11 @@ pub fn show_home(ui: &mut Ui) -> Option<Page> {
             "Evaluate expressions, differentiate,\nintegrate, find roots, and plot\nsymbolic formulas with CAS engine.",
             Page::Calculator,
         ),
+        (
+            "Mesh Viewer",
+            "Load, generate, and inspect finite-element\nmeshes. Visualize scalar fields,\nquality metrics, and refine interactively.",
+            Page::MeshViewer,
+        ),
     ];
 
     // Audio card is only shown when the audio feature is enabled.

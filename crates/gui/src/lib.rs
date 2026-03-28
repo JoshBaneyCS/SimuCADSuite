@@ -6,6 +6,7 @@ pub mod camera;
 pub mod fluid_ui;
 pub mod home;
 pub mod kinematics_ui;
+pub mod mesh_ui;
 pub mod plotting;
 pub mod renderer_3d;
 pub mod settings_ui;
