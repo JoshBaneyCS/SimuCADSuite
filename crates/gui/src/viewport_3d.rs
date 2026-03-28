@@ -40,6 +40,9 @@ impl Default for Viewport3D {
     }
 }
 
+/// A colored edge: start position, end position, start RGBA, end RGBA.
+pub type ColoredEdge = ([f64; 3], [f64; 3], [f32; 4], [f32; 4]);
+
 impl Viewport3D {
     /// Render the 3D viewport.
     ///
@@ -51,6 +54,42 @@ impl Viewport3D {
         ui: &mut Ui,
         particles: Option<&[(f64, f64, f64, f64)]>,
         mesh_edges: Option<&[([f64; 3], [f64; 3])]>,
+    ) {
+        // Convert uniform-color edges to colored edges.
+        let colored: Vec<ColoredEdge> = mesh_edges
+            .map(|edges| {
+                let color = [0.6_f32, 0.8, 1.0, 0.7];
+                edges.iter().map(|(s, e)| (*s, *e, color, color)).collect()
+            })
+            .unwrap_or_default();
+
+        let colored_ref = if mesh_edges.is_some() {
+            Some(colored.as_slice())
+        } else {
+            None
+        };
+
+        self.show_impl(ui, particles, colored_ref);
+    }
+
+    /// Render the 3D viewport with per-vertex colored edges.
+    ///
+    /// Each edge carries individual start/end RGBA colours for field
+    /// visualization on mesh wireframes.
+    pub fn show_colored(
+        &mut self,
+        ui: &mut Ui,
+        particles: Option<&[(f64, f64, f64, f64)]>,
+        colored_edges: Option<&[ColoredEdge]>,
+    ) {
+        self.show_impl(ui, particles, colored_edges);
+    }
+
+    fn show_impl(
+        &mut self,
+        ui: &mut Ui,
+        particles: Option<&[(f64, f64, f64, f64)]>,
+        colored_edges: Option<&[ColoredEdge]>,
     ) {
         // Controls strip above the viewport.
         ui.horizontal(|ui| {
@@ -112,17 +151,16 @@ impl Viewport3D {
             build_axes(&mut line_vertices, self.grid_size * 0.5);
         }
 
-        // Mesh wireframe.
-        if let Some(edges) = mesh_edges {
-            let color = [0.6, 0.8, 1.0, 0.7];
-            for (start, end) in edges {
+        // Mesh wireframe (colored edges).
+        if let Some(edges) = colored_edges {
+            for &(start, end, color_s, color_e) in edges {
                 line_vertices.push(Vertex3D {
                     position: [start[0] as f32, start[1] as f32, start[2] as f32],
-                    color,
+                    color: color_s,
                 });
                 line_vertices.push(Vertex3D {
                     position: [end[0] as f32, end[1] as f32, end[2] as f32],
-                    color,
+                    color: color_e,
                 });
             }
         }

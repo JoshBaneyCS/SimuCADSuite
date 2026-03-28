@@ -1,6 +1,10 @@
+pub mod field;
+pub mod generator;
 pub mod io;
+pub mod obj;
 pub mod parser;
 pub mod quality;
+pub mod refine;
 pub mod spatial;
 pub mod stl;
 pub mod types;

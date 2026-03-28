@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 use simucad_core::types::{BoundingBox3, Vec3};
 
@@ -125,6 +127,37 @@ impl Mesh {
     /// Total number of elements.
     pub fn element_count(&self) -> usize {
         self.elements.len()
+    }
+
+    /// Extract unique edges as pairs of node indices.
+    ///
+    /// Each edge appears once with `(min_idx, max_idx)` ordering.
+    pub fn edges(&self) -> Vec<(usize, usize)> {
+        let mut seen = HashSet::new();
+        for elem in &self.elements {
+            let ni = &elem.node_indices;
+            let pairs: Vec<(usize, usize)> = match elem.element_type {
+                ElementType::Line2 => vec![(ni[0], ni[1])],
+                ElementType::Triangle3 => {
+                    vec![(ni[0], ni[1]), (ni[1], ni[2]), (ni[2], ni[0])]
+                }
+                ElementType::Tetrahedron4 => {
+                    vec![
+                        (ni[0], ni[1]),
+                        (ni[0], ni[2]),
+                        (ni[0], ni[3]),
+                        (ni[1], ni[2]),
+                        (ni[1], ni[3]),
+                        (ni[2], ni[3]),
+                    ]
+                }
+            };
+            for (a, b) in pairs {
+                let key = (a.min(b), a.max(b));
+                seen.insert(key);
+            }
+        }
+        seen.into_iter().collect()
     }
 }
 
