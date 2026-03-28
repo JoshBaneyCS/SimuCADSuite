@@ -4,7 +4,10 @@
 //! [`eframe::App`] and orchestrates page navigation, settings, and the
 //! menu bar.
 
+use std::path::PathBuf;
+
 use eframe::egui;
+use simucad_core::export::ProjectFile;
 use simucad_core::settings::AppSettings;
 
 use crate::calculator_ui::CalculatorPanel;
@@ -66,6 +69,10 @@ pub struct SimuApp {
     pub audio_panel: AudioPanel,
     /// Whether the settings dialog is open (as a floating window).
     pub settings_open: bool,
+    /// Path of the currently open project file.
+    pub project_path: Option<PathBuf>,
+    /// Status message for file operations.
+    pub file_status: String,
 }
 
 impl SimuApp {
@@ -95,6 +102,107 @@ impl SimuApp {
             #[cfg(feature = "audio")]
             audio_panel: AudioPanel::default(),
             settings_open: false,
+            project_path: None,
+            file_status: String::new(),
+        }
+    }
+
+    /// Save current panel parameters to a project file.
+    fn save_project(&mut self) {
+        let path = self
+            .project_path
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("project.simucad"));
+
+        let kin = &self.kinematics_panel;
+        let project = ProjectFile {
+            version: 1,
+            name: path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            kinematics: Some(simucad_core::export::KinematicsProject {
+                velocity: kin.velocity,
+                angle_deg: kin.angle_deg,
+                gravity: kin.gravity,
+                mass: kin.mass,
+                area: kin.area,
+                initial_height: kin.initial_height,
+                drag_shape: format!("{:?}", kin.drag_shape),
+                integrator: format!("{:?}", kin.integrator_choice),
+            }),
+            fluid: Some(simucad_core::export::FluidProject {
+                mesh_path: self.fluid_panel.mesh_path.clone(),
+                velocity_x: self.fluid_panel.velocity_x,
+                velocity_y: self.fluid_panel.velocity_y,
+                velocity_z: self.fluid_panel.velocity_z,
+                particle_count: self.fluid_panel.particle_count,
+                num_steps: self.fluid_panel.num_steps,
+                use_gpu: self.fluid_panel.use_gpu,
+            }),
+            calculator: Some(simucad_core::export::CalculatorProject {
+                expression: self.calculator_panel.expression_input.clone(),
+                variable: self.calculator_panel.diff_variable.clone(),
+                plot_x_min: self.calculator_panel.plot_x_min,
+                plot_x_max: self.calculator_panel.plot_x_max,
+                plot_samples: self.calculator_panel.plot_samples,
+                angle_mode: "Radians".into(),
+            }),
+        };
+
+        match project.save(&path) {
+            Ok(()) => {
+                self.file_status = format!("Project saved to {}", path.display());
+                self.project_path = Some(path);
+            }
+            Err(e) => {
+                self.file_status = format!("Save failed: {e}");
+            }
+        }
+    }
+
+    /// Load panel parameters from a project file.
+    fn load_project(&mut self) {
+        let path = self
+            .project_path
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("project.simucad"));
+
+        match ProjectFile::load(&path) {
+            Ok(project) => {
+                if let Some(kin) = project.kinematics {
+                    self.kinematics_panel.velocity = kin.velocity;
+                    self.kinematics_panel.angle_deg = kin.angle_deg;
+                    self.kinematics_panel.gravity = kin.gravity;
+                    self.kinematics_panel.mass = kin.mass;
+                    self.kinematics_panel.area = kin.area;
+                    self.kinematics_panel.initial_height = kin.initial_height;
+                }
+
+                if let Some(fluid) = project.fluid {
+                    self.fluid_panel.mesh_path = fluid.mesh_path;
+                    self.fluid_panel.velocity_x = fluid.velocity_x;
+                    self.fluid_panel.velocity_y = fluid.velocity_y;
+                    self.fluid_panel.velocity_z = fluid.velocity_z;
+                    self.fluid_panel.particle_count = fluid.particle_count;
+                    self.fluid_panel.num_steps = fluid.num_steps;
+                    self.fluid_panel.use_gpu = fluid.use_gpu;
+                }
+
+                if let Some(calc) = project.calculator {
+                    self.calculator_panel.expression_input = calc.expression;
+                    self.calculator_panel.diff_variable = calc.variable;
+                    self.calculator_panel.plot_x_min = calc.plot_x_min;
+                    self.calculator_panel.plot_x_max = calc.plot_x_max;
+                    self.calculator_panel.plot_samples = calc.plot_samples;
+                }
+
+                self.file_status = format!("Project loaded from {}", path.display());
+                self.project_path = Some(path);
+            }
+            Err(e) => {
+                self.file_status = format!("Load failed: {e}");
+            }
         }
     }
 }
@@ -116,6 +224,15 @@ impl eframe::App for SimuApp {
                 ui.menu_button("File", |ui| {
                     if ui.button("Home").clicked() {
                         self.current_page = Page::Home;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("Save Project...").clicked() {
+                        self.save_project();
+                        ui.close_menu();
+                    }
+                    if ui.button("Load Project...").clicked() {
+                        self.load_project();
                         ui.close_menu();
                     }
                     ui.separator();
@@ -169,6 +286,12 @@ impl eframe::App for SimuApp {
                     .small()
                     .weak(),
                 );
+                if !self.file_status.is_empty() {
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new(&self.file_status).small().weak(),
+                    );
+                }
                 ui.with_layout(
                     egui::Layout::right_to_left(egui::Align::Center),
                     |ui| {

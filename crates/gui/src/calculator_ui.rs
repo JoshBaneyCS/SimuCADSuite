@@ -5,7 +5,10 @@
 //! function plotting. CAS-dependent features are gated behind
 //! `#[cfg(feature = "cas")]`.
 
+use std::path::PathBuf;
+
 use egui::Ui;
+use simucad_core::export::DataTable;
 
 use crate::plotting;
 
@@ -146,6 +149,8 @@ pub struct CalculatorPanel {
     pub dft_num_samples: usize,
     /// DFT magnitude spectrum: (frequency, magnitude) pairs.
     pub dft_spectrum: Vec<(f64, f64)>,
+    /// Export file path (without extension).
+    pub export_path: String,
 }
 
 impl Default for CalculatorPanel {
@@ -204,6 +209,7 @@ impl Default for CalculatorPanel {
             dft_sample_rate: 1000.0,
             dft_num_samples: 1024,
             dft_spectrum: Vec::new(),
+            export_path: "calculator".into(),
         }
     }
 }
@@ -452,6 +458,12 @@ impl CalculatorPanel {
             plotting::plot_function_2d_ex(ui, &self.plot_data, &self.expression_input, equal_aspect);
         }
 
+        // Export controls.
+        if !self.plot_data.is_empty() || !self.plot_3d_data.is_empty() {
+            ui.add_space(8.0);
+            self.show_calc_export(ui);
+        }
+
         // PDE wave / heat section.
         ui.add_space(8.0);
         self.show_pde_section(ui);
@@ -472,6 +484,87 @@ impl CalculatorPanel {
                     });
                 }
             });
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Export
+    // -----------------------------------------------------------------------
+
+    fn show_calc_export(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Export path:");
+            ui.text_edit_singleline(&mut self.export_path);
+            if ui.button("Save CSV").clicked() {
+                self.export_calc_csv();
+            }
+            if ui.button("Save XLSX").clicked() {
+                self.export_calc_xlsx();
+            }
+        });
+    }
+
+    fn collect_calc_tables(&self) -> Vec<DataTable> {
+        let mut tables = Vec::new();
+
+        // 2D plot data.
+        if !self.plot_data.is_empty() {
+            let xs: Vec<f64> = self.plot_data.iter().map(|&(x, _)| x).collect();
+            let ys: Vec<f64> = self.plot_data.iter().map(|&(_, y)| y).collect();
+            let mut table = DataTable::new("Plot Data");
+            table.add_column("x", "", xs);
+            table.add_column("y", "", ys);
+            tables.push(table);
+        }
+
+        // 3D plot data.
+        if !self.plot_3d_data.is_empty() {
+            let xs: Vec<f64> = self.plot_3d_data.iter().map(|&(x, _, _)| x).collect();
+            let ys: Vec<f64> = self.plot_3d_data.iter().map(|&(_, y, _)| y).collect();
+            let zs: Vec<f64> = self.plot_3d_data.iter().map(|&(_, _, z)| z).collect();
+            let mut table = DataTable::new("3D Plot Data");
+            table.add_column("x", "", xs);
+            table.add_column("y", "", ys);
+            table.add_column("z", "", zs);
+            tables.push(table);
+        }
+
+        // DFT spectrum.
+        if !self.dft_spectrum.is_empty() {
+            let freqs: Vec<f64> = self.dft_spectrum.iter().map(|&(f, _)| f).collect();
+            let mags: Vec<f64> = self.dft_spectrum.iter().map(|&(_, m)| m).collect();
+            let mut table = DataTable::new("DFT Spectrum");
+            table.add_column("frequency", "Hz", freqs);
+            table.add_column("magnitude", "", mags);
+            tables.push(table);
+        }
+
+        tables
+    }
+
+    fn export_calc_csv(&mut self) {
+        let tables = self.collect_calc_tables();
+        if tables.is_empty() {
+            self.result = Some("No data to export".into());
+            return;
+        }
+        let path = PathBuf::from(format!("{}.csv", self.export_path));
+        match tables[0].write_csv(&path) {
+            Ok(()) => self.result = Some(format!("Saved to {}", path.display())),
+            Err(e) => self.result = Some(format!("CSV error: {e}")),
+        }
+    }
+
+    fn export_calc_xlsx(&mut self) {
+        let tables = self.collect_calc_tables();
+        if tables.is_empty() {
+            self.result = Some("No data to export".into());
+            return;
+        }
+        let path = PathBuf::from(format!("{}.xlsx", self.export_path));
+        match simucad_core::export::write_tables_xlsx(&tables, &path) {
+            Ok(()) => self.result = Some(format!("Saved to {}", path.display())),
+            Err(e) => self.result = Some(format!("XLSX error: {e}")),
         }
     }
 

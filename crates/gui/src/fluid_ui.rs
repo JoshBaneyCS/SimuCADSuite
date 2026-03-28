@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use egui::Ui;
+use simucad_core::export::DataTable;
 use simucad_core::progress::ProgressReporter;
 use simucad_core::types::Vec3;
 use simucad_mesh::io::{GmshLoader, MeshLoader};
@@ -78,6 +79,8 @@ pub struct FluidPanel {
     pub log_messages: Vec<String>,
     /// 3D viewport for particle/mesh visualization.
     pub viewport: Viewport3D,
+    /// Export file path (without extension).
+    pub export_path: String,
 }
 
 impl Default for FluidPanel {
@@ -97,6 +100,7 @@ impl Default for FluidPanel {
             last_result: None,
             log_messages: Vec::new(),
             viewport: Viewport3D::default(),
+            export_path: "fluid_results".into(),
         }
     }
 }
@@ -265,7 +269,7 @@ impl FluidPanel {
         }
     }
 
-    fn show_results(&self, ui: &mut Ui) {
+    fn show_results(&mut self, ui: &mut Ui) {
         if let Some(ref res) = self.last_result {
             ui.add_space(8.0);
             ui.separator();
@@ -305,6 +309,43 @@ impl FluidPanel {
                     ui.label(&res.backend_name);
                     ui.end_row();
                 });
+
+            // Export controls.
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label("Export path:");
+                ui.text_edit_singleline(&mut self.export_path);
+                if ui.button("Save CSV").clicked() {
+                    self.export_fluid_csv();
+                }
+                if ui.button("Save XLSX").clicked() {
+                    self.export_fluid_xlsx();
+                }
+            });
+        }
+    }
+
+    fn export_fluid_csv(&mut self) {
+        let Some(ref res) = self.last_result else {
+            return;
+        };
+        let table = fluid_result_to_table(res);
+        let path = PathBuf::from(format!("{}.csv", self.export_path));
+        match table.write_csv(&path) {
+            Ok(()) => self.log_messages.push(format!("Saved to {}", path.display())),
+            Err(e) => self.log_messages.push(format!("CSV error: {e}")),
+        }
+    }
+
+    fn export_fluid_xlsx(&mut self) {
+        let Some(ref res) = self.last_result else {
+            return;
+        };
+        let table = fluid_result_to_table(res);
+        let path = PathBuf::from(format!("{}.xlsx", self.export_path));
+        match table.write_xlsx(&path) {
+            Ok(()) => self.log_messages.push(format!("Saved to {}", path.display())),
+            Err(e) => self.log_messages.push(format!("XLSX error: {e}")),
         }
     }
 
@@ -486,6 +527,29 @@ impl FluidPanel {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Convert a [`FluidResult`] to a [`DataTable`] of particle positions.
+fn fluid_result_to_table(res: &FluidResult) -> DataTable {
+    let n = res.particle_viz.len();
+    let mut x = Vec::with_capacity(n);
+    let mut y = Vec::with_capacity(n);
+    let mut z = Vec::with_capacity(n);
+    let mut speed = Vec::with_capacity(n);
+
+    for &(px, py, pz, s) in &res.particle_viz {
+        x.push(px);
+        y.push(py);
+        z.push(pz);
+        speed.push(s);
+    }
+
+    let mut table = DataTable::new("Fluid Particles");
+    table.add_column("x", "m", x);
+    table.add_column("y", "m", y);
+    table.add_column("z", "m", z);
+    table.add_column("speed", "m/s", speed);
+    table
+}
 
 /// Extract unique wireframe edges from a mesh for 3D rendering.
 fn extract_mesh_edges(mesh: &Mesh) -> Vec<([f64; 3], [f64; 3])> {
