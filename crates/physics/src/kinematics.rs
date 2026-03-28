@@ -11,7 +11,7 @@ use simucad_core::error::PhysicsError;
 use simucad_core::types::{KinematicState, SimulationConfig, Trajectory, TrajectoryPoint, Vec2};
 
 use crate::drag::DragModel;
-use crate::integrator::{EulerIntegrator, Integrator};
+use crate::integrator::Integrator;
 
 // ---------------------------------------------------------------------------
 // Vacuum trajectory (analytical)
@@ -121,7 +121,7 @@ pub fn vacuum_trajectory(
 // ---------------------------------------------------------------------------
 
 /// Compute the trajectory of a projectile subject to aerodynamic drag using
-/// forward Euler integration.
+/// numerical integration.
 ///
 /// # Parameters
 ///
@@ -132,6 +132,7 @@ pub fn vacuum_trajectory(
 /// - `mass` -- projectile mass (kg), must be positive.
 /// - `initial_height` -- launch height above ground (m), must be non-negative.
 /// - `config` -- simulation configuration (timestep, max steps).
+/// - `integrator` -- the numerical integrator to use (Euler, RK4, etc.).
 ///
 /// # Returns
 ///
@@ -150,6 +151,7 @@ pub fn drag_trajectory(
     mass: f64,
     initial_height: f64,
     config: &SimulationConfig,
+    integrator: &dyn Integrator,
 ) -> Result<Trajectory, PhysicsError> {
     // --- Input validation ---
     if v0 <= 0.0 {
@@ -189,8 +191,6 @@ pub fn drag_trajectory(
 
     let vx = v0 * angle_rad.cos();
     let vy = v0 * angle_rad.sin();
-
-    let integrator = EulerIntegrator::new();
 
     let mut state = KinematicState {
         time: 0.0,
@@ -294,6 +294,7 @@ pub fn drag_trajectory(
 mod tests {
     use super::*;
     use crate::drag::{DragModel, DragShape};
+    use crate::integrator::{EulerIntegrator, RK4Integrator};
     use simucad_core::constants::STANDARD_GRAVITY;
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
@@ -431,7 +432,7 @@ mod tests {
         let drag_model = DragModel::at_sea_level(DragShape::Sphere, 0.01);
         let mass = 1.0;
         let with_drag =
-            drag_trajectory(v0, angle, G, &drag_model, mass, 0.0, &config).unwrap();
+            drag_trajectory(v0, angle, G, &drag_model, mass, 0.0, &config, &EulerIntegrator::new()).unwrap();
 
         assert!(
             with_drag.range < vacuum.range,
@@ -455,7 +456,7 @@ mod tests {
             ..SimulationConfig::default()
         };
         let drag_model = DragModel::at_sea_level(DragShape::Sphere, 0.005);
-        let traj = drag_trajectory(50.0, FRAC_PI_4, G, &drag_model, 0.5, 0.0, &config).unwrap();
+        let traj = drag_trajectory(50.0, FRAC_PI_4, G, &drag_model, 0.5, 0.0, &config, &EulerIntegrator::new()).unwrap();
 
         // Last point should be at or very near y=0
         let last = traj.points.last().unwrap();
@@ -474,7 +475,7 @@ mod tests {
             ..SimulationConfig::default()
         };
         let drag_model = DragModel::at_sea_level(DragShape::Sphere, 0.01);
-        let traj = drag_trajectory(30.0, 0.0, G, &drag_model, 1.0, 100.0, &config).unwrap();
+        let traj = drag_trajectory(30.0, 0.0, G, &drag_model, 1.0, 100.0, &config, &EulerIntegrator::new()).unwrap();
 
         // Should have positive range
         assert!(traj.range > 0.0);
@@ -487,10 +488,10 @@ mod tests {
         let config = SimulationConfig::default();
         let drag_model = DragModel::at_sea_level(DragShape::Sphere, 0.01);
 
-        let result = drag_trajectory(50.0, FRAC_PI_4, G, &drag_model, 0.0, 0.0, &config);
+        let result = drag_trajectory(50.0, FRAC_PI_4, G, &drag_model, 0.0, 0.0, &config, &EulerIntegrator::new());
         assert!(result.is_err());
 
-        let result = drag_trajectory(50.0, FRAC_PI_4, G, &drag_model, -1.0, 0.0, &config);
+        let result = drag_trajectory(50.0, FRAC_PI_4, G, &drag_model, -1.0, 0.0, &config, &EulerIntegrator::new());
         assert!(result.is_err());
     }
 
@@ -498,7 +499,7 @@ mod tests {
     fn drag_invalid_area() {
         let config = SimulationConfig::default();
         let drag_model = DragModel::new(DragShape::Sphere, -0.01, 1.225);
-        let result = drag_trajectory(50.0, FRAC_PI_4, G, &drag_model, 1.0, 0.0, &config);
+        let result = drag_trajectory(50.0, FRAC_PI_4, G, &drag_model, 1.0, 0.0, &config, &EulerIntegrator::new());
         assert!(result.is_err());
     }
 
@@ -510,7 +511,7 @@ mod tests {
             ..SimulationConfig::default()
         };
         let drag_model = DragModel::at_sea_level(DragShape::Sphere, 0.01);
-        let result = drag_trajectory(100.0, FRAC_PI_4, G, &drag_model, 1.0, 0.0, &config);
+        let result = drag_trajectory(100.0, FRAC_PI_4, G, &drag_model, 1.0, 0.0, &config, &EulerIntegrator::new());
         assert!(matches!(
             result,
             Err(PhysicsError::MaxStepsExceeded { .. })
@@ -526,10 +527,11 @@ mod tests {
         };
         let drag_model = DragModel::at_sea_level(DragShape::Sphere, 0.01);
 
+        let euler = EulerIntegrator::new();
         let light =
-            drag_trajectory(100.0, FRAC_PI_4, G, &drag_model, 0.1, 0.0, &config).unwrap();
+            drag_trajectory(100.0, FRAC_PI_4, G, &drag_model, 0.1, 0.0, &config, &euler).unwrap();
         let heavy =
-            drag_trajectory(100.0, FRAC_PI_4, G, &drag_model, 10.0, 0.0, &config).unwrap();
+            drag_trajectory(100.0, FRAC_PI_4, G, &drag_model, 10.0, 0.0, &config, &euler).unwrap();
 
         assert!(
             heavy.range > light.range,
@@ -537,6 +539,54 @@ mod tests {
             heavy.range,
             light.range
         );
+    }
+
+    #[test]
+    fn rk4_more_accurate_than_euler_for_vacuum() {
+        // RK4 with a larger timestep should still be more accurate than Euler
+        let v0 = 80.0;
+        let angle = FRAC_PI_4;
+        let analytical = vacuum_trajectory(v0, angle, G, 0.0, 1000).unwrap();
+
+        let vacuum_model = DragModel::vacuum();
+
+        // Euler with dt=0.01
+        let euler_config = SimulationConfig {
+            timestep: 0.01,
+            max_steps: 500_000,
+            ..SimulationConfig::default()
+        };
+        let euler_traj =
+            drag_trajectory(v0, angle, G, &vacuum_model, 1.0, 0.0, &euler_config, &EulerIntegrator::new()).unwrap();
+
+        // RK4 with same dt=0.01
+        let rk4_traj =
+            drag_trajectory(v0, angle, G, &vacuum_model, 1.0, 0.0, &euler_config, &RK4Integrator).unwrap();
+
+        let euler_err = (euler_traj.range - analytical.range).abs();
+        let rk4_err = (rk4_traj.range - analytical.range).abs();
+
+        assert!(
+            rk4_err < euler_err,
+            "RK4 error ({:.6}) should be smaller than Euler error ({:.6})",
+            rk4_err,
+            euler_err
+        );
+    }
+
+    #[test]
+    fn rk4_drag_trajectory_terminates() {
+        let config = SimulationConfig {
+            timestep: 0.01,
+            max_steps: 100_000,
+            ..SimulationConfig::default()
+        };
+        let drag_model = DragModel::at_sea_level(DragShape::Sphere, 0.01);
+        let traj = drag_trajectory(80.0, FRAC_PI_4, G, &drag_model, 1.0, 0.0, &config, &RK4Integrator).unwrap();
+
+        let last = traj.points.last().unwrap();
+        assert!(last.position.y.abs() < 0.05, "last y = {}", last.position.y);
+        assert!(traj.range > 0.0);
     }
 
     #[test]
@@ -552,7 +602,7 @@ mod tests {
 
         let vacuum_model = DragModel::vacuum();
         let numerical =
-            drag_trajectory(v0, angle, G, &vacuum_model, 1.0, 0.0, &config).unwrap();
+            drag_trajectory(v0, angle, G, &vacuum_model, 1.0, 0.0, &config, &EulerIntegrator::new()).unwrap();
         let analytical = vacuum_trajectory(v0, angle, G, 0.0, 1000).unwrap();
 
         // Should agree within ~1%
