@@ -130,11 +130,14 @@ impl WgpuBackend {
 
         debug!("wgpu adapter: {:?}", adapter.get_info());
 
-        // Request timestamp query feature if available, otherwise proceed without.
+        // Request timestamp query features if available, otherwise proceed without.
         let adapter_features = adapter.features();
         let mut required_features = wgpu::Features::empty();
         if adapter_features.contains(wgpu::Features::TIMESTAMP_QUERY) {
             required_features |= wgpu::Features::TIMESTAMP_QUERY;
+        }
+        if adapter_features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS) {
+            required_features |= wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
         }
 
         let (device, queue) = pollster::block_on(adapter.request_device(

@@ -5,7 +5,7 @@
 //! against manual calculation.
 
 use simucad_core::types::{Particle, Vec3};
-use simucad_gpu::backend::ComputeBackend;
+use simucad_gpu::backend::{select_backend, ComputeBackend};
 use simucad_gpu::cpu_backend::CpuBackend;
 
 const TOL: f64 = 1e-10;
@@ -278,6 +278,54 @@ fn advect_then_velocity_field_consistency() {
 fn backend_name_is_cpu_rayon() {
     let backend = CpuBackend::new();
     assert_eq!(backend.name(), "cpu-rayon");
+}
+
+#[test]
+fn select_backend_advect_matches_cpu() {
+    // Verify that select_backend() (GPU or CPU) produces the same results as
+    // the explicit CPU backend for a non-trivial advection.
+    let auto_backend = select_backend();
+    let cpu_backend = CpuBackend::new();
+
+    let make_particles = || -> Vec<Particle> {
+        (0..500)
+            .map(|i| {
+                let f = i as f64;
+                Particle::at_rest(Vec3::new(f * 0.1, f * 0.05, f * 0.02))
+            })
+            .collect()
+    };
+
+    let mut auto_particles = make_particles();
+    let mut cpu_particles = make_particles();
+
+    let velocity = Vec3::new(3.0, -1.5, 0.7);
+    let dt = 0.1;
+
+    // Run 5 steps on both backends
+    for _ in 0..5 {
+        auto_backend
+            .advect_particles(&mut auto_particles, velocity, dt)
+            .expect("auto backend advection should succeed");
+        cpu_backend
+            .advect_particles(&mut cpu_particles, velocity, dt)
+            .expect("cpu backend advection should succeed");
+    }
+
+    // GPU uses f32 internally so tolerance must be looser than f64 epsilon
+    let gpu_tol = 1e-4;
+    for (i, (a, c)) in auto_particles.iter().zip(cpu_particles.iter()).enumerate() {
+        assert!(
+            (a.position.x - c.position.x).abs() < gpu_tol
+                && (a.position.y - c.position.y).abs() < gpu_tol
+                && (a.position.z - c.position.z).abs() < gpu_tol,
+            "particle {} mismatch after 5 steps: auto={:?} cpu={:?} (backend={})",
+            i,
+            a.position,
+            c.position,
+            auto_backend.name(),
+        );
+    }
 }
 
 #[test]
