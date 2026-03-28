@@ -9,9 +9,11 @@
 #![cfg(feature = "audio")]
 
 use std::path::Path;
+use std::sync::Arc;
 
 use egui::Ui;
 use simucad_audio::fft::{compute_fft, compute_power_spectrum};
+use simucad_audio::playback::{AudioPlayer, PlaybackState};
 use simucad_audio::spectral::{compute_rms, compute_spectral_features, compute_zero_crossing_rate};
 use simucad_audio::stft::compute_stft;
 use simucad_audio::types::AudioSignal;
@@ -51,6 +53,10 @@ pub struct AudioPanel {
     stft_hop_size: usize,
     status: String,
     waveform_points: Vec<(f64, f64)>,
+    /// Active audio player (None when no file is playing).
+    player: Option<AudioPlayer>,
+    /// Shared playback state for reading position from the GUI thread.
+    playback_state: Option<Arc<PlaybackState>>,
 }
 
 impl Default for AudioPanel {
@@ -71,6 +77,8 @@ impl Default for AudioPanel {
             stft_hop_size: 512,
             status: String::new(),
             waveform_points: Vec::new(),
+            player: None,
+            playback_state: None,
         }
     }
 }
@@ -120,6 +128,8 @@ impl AudioPanel {
         self.show_file_input(ui);
         ui.add_space(8.0);
         self.show_signal_info(ui);
+        ui.add_space(8.0);
+        self.show_playback_controls(ui);
         ui.add_space(8.0);
         self.show_fft_controls(ui);
         ui.add_space(4.0);
@@ -242,6 +252,87 @@ impl AudioPanel {
         });
     }
 
+    // -- Playback controls ---------------------------------------------------
+
+    fn show_playback_controls(&mut self, ui: &mut Ui) {
+        let has_signal = self.signal.is_some();
+
+        ui.horizontal(|ui| {
+            ui.strong("Playback");
+            ui.add_space(8.0);
+
+            let is_playing = self
+                .playback_state
+                .as_ref()
+                .is_some_and(|s| s.is_playing());
+
+            // Play / Pause toggle
+            if is_playing {
+                if ui.add_enabled(true, egui::Button::new("Pause")).clicked() {
+                    if let Some(ref player) = self.player {
+                        player.pause();
+                    }
+                }
+            } else if ui
+                .add_enabled(has_signal, egui::Button::new("Play"))
+                .clicked()
+            {
+                // Create player on first play if needed.
+                if self.player.is_none() {
+                    self.create_player();
+                }
+                if let Some(ref player) = self.player {
+                    player.play();
+                }
+            }
+
+            // Stop
+            if ui
+                .add_enabled(self.player.is_some(), egui::Button::new("Stop"))
+                .clicked()
+            {
+                if let Some(ref player) = self.player {
+                    player.stop();
+                }
+            }
+
+            // Position / duration label
+            if let Some(ref state) = self.playback_state {
+                let pos = state.position_secs();
+                let dur = state.duration_secs();
+                ui.label(format!(
+                    "{:02}:{:04.1} / {:02}:{:04.1}",
+                    pos as u32 / 60,
+                    pos % 60.0,
+                    dur as u32 / 60,
+                    dur % 60.0,
+                ));
+            }
+        });
+
+        // Seek slider
+        if let Some(ref state) = self.playback_state {
+            let mut progress = state.progress() as f32;
+            let slider = egui::Slider::new(&mut progress, 0.0..=1.0)
+                .show_value(false)
+                .text("Seek");
+            if ui.add(slider).changed() {
+                if let Some(ref player) = self.player {
+                    player.seek_fraction(progress as f64);
+                }
+            }
+        }
+
+        // Request continuous repaint while playing so cursor updates.
+        if self
+            .playback_state
+            .as_ref()
+            .is_some_and(|s| s.is_playing())
+        {
+            ui.ctx().request_repaint();
+        }
+    }
+
     // -- Waveform plot -------------------------------------------------------
 
     fn show_waveform_plot(&self, ui: &mut Ui) {
@@ -257,12 +348,27 @@ impl AudioPanel {
             .collect();
         let line = egui_plot::Line::new(points).name("Waveform");
 
+        // Build cursor line at current playback position.
+        let cursor_pos = self.playback_state.as_ref().map(|s| s.position_secs());
+
         egui_plot::Plot::new("waveform_plot")
             .height(150.0)
             .x_axis_label("Time (s)")
             .y_axis_label("Amplitude")
             .show(ui, |plot_ui| {
                 plot_ui.line(line);
+
+                // Draw vertical cursor line at playback position.
+                if let Some(t) = cursor_pos {
+                    let cursor = egui_plot::Line::new(egui_plot::PlotPoints::new(vec![
+                        [t, -1.0],
+                        [t, 1.0],
+                    ]))
+                    .name("Cursor")
+                    .color(egui::Color32::from_rgb(255, 220, 50))
+                    .width(2.0);
+                    plot_ui.line(cursor);
+                }
             });
     }
 
@@ -411,6 +517,10 @@ impl AudioPanel {
     // -----------------------------------------------------------------------
 
     fn load_file(&mut self) {
+        // Stop any existing playback before loading a new file.
+        self.player = None;
+        self.playback_state = None;
+
         let path = Path::new(&self.file_path);
         match simucad_audio::decoder::decode_file(path) {
             Ok(signal) => {
@@ -436,6 +546,22 @@ impl AudioPanel {
                 self.signal = None;
                 self.mono_signal = None;
                 self.waveform_points.clear();
+            }
+        }
+    }
+
+    fn create_player(&mut self) {
+        let Some(ref signal) = self.signal else {
+            return;
+        };
+        match AudioPlayer::new(signal) {
+            Ok(player) => {
+                self.playback_state = Some(Arc::clone(player.state()));
+                self.player = Some(player);
+                self.status = "Player ready.".to_string();
+            }
+            Err(e) => {
+                self.status = format!("Playback error: {e}");
             }
         }
     }
