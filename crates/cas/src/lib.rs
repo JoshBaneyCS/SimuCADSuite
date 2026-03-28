@@ -2,6 +2,7 @@ pub mod ast;
 pub mod derivative;
 pub mod equations;
 pub mod evaluator;
+pub mod fourier;
 pub mod integration;
 pub mod interpolation;
 pub mod latex;

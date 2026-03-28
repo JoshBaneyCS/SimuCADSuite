@@ -5,6 +5,22 @@ use simucad_core::error::CasError;
 use crate::ast::{BinOp, Expr, UnaryOp};
 
 // ---------------------------------------------------------------------------
+// Angle mode
+// ---------------------------------------------------------------------------
+
+/// Controls whether trigonometric functions interpret arguments as radians or
+/// degrees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AngleMode {
+    /// Radians (default).
+    #[default]
+    Radians,
+    /// Degrees — trig inputs are converted from degrees to radians, and
+    /// inverse trig outputs are converted from radians to degrees.
+    Degrees,
+}
+
+// ---------------------------------------------------------------------------
 // Environment
 // ---------------------------------------------------------------------------
 
@@ -46,7 +62,21 @@ impl Environment {
 /// variable bindings.
 ///
 /// Built-in constants `pi` and `e` are recognised automatically.
+/// All trigonometric functions operate in **radians**.
 pub fn evaluate(expr: &Expr, env: &Environment) -> Result<f64, CasError> {
+    evaluate_with_angle_mode(expr, env, AngleMode::Radians)
+}
+
+/// Evaluate an expression tree with a specified [`AngleMode`].
+///
+/// When `mode` is [`AngleMode::Degrees`], arguments to `sin`, `cos`, `tan`
+/// are converted from degrees to radians before evaluation, and results of
+/// `asin`, `acos`, `atan` are converted from radians to degrees.
+pub fn evaluate_with_angle_mode(
+    expr: &Expr,
+    env: &Environment,
+    mode: AngleMode,
+) -> Result<f64, CasError> {
     match expr {
         Expr::Num(n) => Ok(*n),
 
@@ -62,8 +92,8 @@ pub fn evaluate(expr: &Expr, env: &Environment) -> Result<f64, CasError> {
         }
 
         Expr::BinOp { op, lhs, rhs } => {
-            let l = evaluate(lhs, env)?;
-            let r = evaluate(rhs, env)?;
+            let l = evaluate_with_angle_mode(lhs, env, mode)?;
+            let r = evaluate_with_angle_mode(rhs, env, mode)?;
             match op {
                 BinOp::Add => Ok(l + r),
                 BinOp::Sub => Ok(l - r),
@@ -83,7 +113,7 @@ pub fn evaluate(expr: &Expr, env: &Environment) -> Result<f64, CasError> {
             op: UnaryOp::Neg,
             operand,
         } => {
-            let v = evaluate(operand, env)?;
+            let v = evaluate_with_angle_mode(operand, env, mode)?;
             Ok(-v)
         }
 
@@ -94,11 +124,24 @@ pub fn evaluate(expr: &Expr, env: &Environment) -> Result<f64, CasError> {
                     message: format!("function '{}' requires at least one argument", name),
                 });
             }
-            let arg = evaluate(&args[0], env)?;
+            let arg = evaluate_with_angle_mode(&args[0], env, mode)?;
+
+            let deg2rad = std::f64::consts::PI / 180.0;
+            let is_deg = mode == AngleMode::Degrees;
+
             match name.as_str() {
-                "sin" => Ok(arg.sin()),
-                "cos" => Ok(arg.cos()),
-                "tan" => Ok(arg.tan()),
+                "sin" => {
+                    let a = if is_deg { arg * deg2rad } else { arg };
+                    Ok(a.sin())
+                }
+                "cos" => {
+                    let a = if is_deg { arg * deg2rad } else { arg };
+                    Ok(a.cos())
+                }
+                "tan" => {
+                    let a = if is_deg { arg * deg2rad } else { arg };
+                    Ok(a.tan())
+                }
                 "asin" => {
                     if !(-1.0..=1.0).contains(&arg) {
                         Err(CasError::DomainError(format!(
@@ -106,7 +149,8 @@ pub fn evaluate(expr: &Expr, env: &Environment) -> Result<f64, CasError> {
                             arg
                         )))
                     } else {
-                        Ok(arg.asin())
+                        let r = arg.asin();
+                        Ok(if is_deg { r / deg2rad } else { r })
                     }
                 }
                 "acos" => {
@@ -116,10 +160,14 @@ pub fn evaluate(expr: &Expr, env: &Environment) -> Result<f64, CasError> {
                             arg
                         )))
                     } else {
-                        Ok(arg.acos())
+                        let r = arg.acos();
+                        Ok(if is_deg { r / deg2rad } else { r })
                     }
                 }
-                "atan" => Ok(arg.atan()),
+                "atan" => {
+                    let r = arg.atan();
+                    Ok(if is_deg { r / deg2rad } else { r })
+                }
                 "exp" => Ok(arg.exp()),
                 "log" | "ln" => {
                     if arg <= 0.0 {
@@ -476,5 +524,65 @@ mod tests {
             Expr::num(1.0),
         );
         assert_eq!(evaluate(&e, &env).unwrap(), 16.0);
+    }
+
+    // ----- Angle mode tests -----
+
+    #[test]
+    fn test_degrees_sin_90() {
+        let env = Environment::new();
+        let e = Expr::func("sin", vec![Expr::num(90.0)]);
+        let val = evaluate_with_angle_mode(&e, &env, AngleMode::Degrees).unwrap();
+        assert!((val - 1.0).abs() < 1e-12, "sin(90°) should be 1, got {val}");
+    }
+
+    #[test]
+    fn test_degrees_cos_180() {
+        let env = Environment::new();
+        let e = Expr::func("cos", vec![Expr::num(180.0)]);
+        let val = evaluate_with_angle_mode(&e, &env, AngleMode::Degrees).unwrap();
+        assert!((val - (-1.0)).abs() < 1e-12, "cos(180°) should be -1, got {val}");
+    }
+
+    #[test]
+    fn test_degrees_tan_45() {
+        let env = Environment::new();
+        let e = Expr::func("tan", vec![Expr::num(45.0)]);
+        let val = evaluate_with_angle_mode(&e, &env, AngleMode::Degrees).unwrap();
+        assert!((val - 1.0).abs() < 1e-12, "tan(45°) should be 1, got {val}");
+    }
+
+    #[test]
+    fn test_degrees_asin_1() {
+        let env = Environment::new();
+        let e = Expr::func("asin", vec![Expr::num(1.0)]);
+        let val = evaluate_with_angle_mode(&e, &env, AngleMode::Degrees).unwrap();
+        assert!((val - 90.0).abs() < 1e-10, "asin(1) in deg should be 90, got {val}");
+    }
+
+    #[test]
+    fn test_degrees_acos_0() {
+        let env = Environment::new();
+        let e = Expr::func("acos", vec![Expr::num(0.0)]);
+        let val = evaluate_with_angle_mode(&e, &env, AngleMode::Degrees).unwrap();
+        assert!((val - 90.0).abs() < 1e-10, "acos(0) in deg should be 90, got {val}");
+    }
+
+    #[test]
+    fn test_degrees_atan_1() {
+        let env = Environment::new();
+        let e = Expr::func("atan", vec![Expr::num(1.0)]);
+        let val = evaluate_with_angle_mode(&e, &env, AngleMode::Degrees).unwrap();
+        assert!((val - 45.0).abs() < 1e-10, "atan(1) in deg should be 45, got {val}");
+    }
+
+    #[test]
+    fn test_radians_mode_unchanged() {
+        // Ensure radians mode gives same result as default evaluate()
+        let env = Environment::new();
+        let e = Expr::func("sin", vec![Expr::num(std::f64::consts::FRAC_PI_2)]);
+        let rad = evaluate_with_angle_mode(&e, &env, AngleMode::Radians).unwrap();
+        let def = evaluate(&e, &env).unwrap();
+        assert!((rad - def).abs() < 1e-15);
     }
 }

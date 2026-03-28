@@ -93,6 +93,103 @@ pub fn generate_3d_points(
 }
 
 // ---------------------------------------------------------------------------
+// Polar point generation
+// ---------------------------------------------------------------------------
+
+/// Generate 2D `(x, y)` points from a polar expression `r = f(theta)`.
+///
+/// Evaluates the expression at evenly spaced theta values in
+/// `[theta_min, theta_max]` and converts to Cartesian: `(r*cos(theta),
+/// r*sin(theta))`. Points where the evaluation fails or `r` is negative
+/// are silently skipped.
+pub fn generate_polar_points(
+    expr: &Expr,
+    theta_var: &str,
+    theta_min: f64,
+    theta_max: f64,
+    num_points: usize,
+) -> Result<Vec<(f64, f64)>, CasError> {
+    if num_points < 2 {
+        return Err(CasError::DomainError(
+            "num_points must be at least 2".into(),
+        ));
+    }
+    if theta_min >= theta_max {
+        return Err(CasError::DomainError(
+            "theta_min must be less than theta_max".into(),
+        ));
+    }
+
+    let step = (theta_max - theta_min) / (num_points - 1) as f64;
+    let mut points = Vec::with_capacity(num_points);
+    let mut env = Environment::new();
+
+    for i in 0..num_points {
+        let theta = theta_min + step * i as f64;
+        env.set(theta_var, theta);
+        match evaluate(expr, &env) {
+            Ok(r) if r.is_finite() => {
+                let x = r * theta.cos();
+                let y = r * theta.sin();
+                points.push((x, y));
+            }
+            _ => { /* skip */ }
+        }
+    }
+
+    Ok(points)
+}
+
+// ---------------------------------------------------------------------------
+// Parametric point generation
+// ---------------------------------------------------------------------------
+
+/// Generate 2D `(x, y)` points from parametric expressions `x = f(t)` and
+/// `y = g(t)`.
+///
+/// Both expressions are evaluated at evenly spaced `t` values in
+/// `[t_min, t_max]`. Points where either evaluation fails are silently
+/// skipped.
+pub fn generate_parametric_points(
+    x_expr: &Expr,
+    y_expr: &Expr,
+    t_var: &str,
+    t_min: f64,
+    t_max: f64,
+    num_points: usize,
+) -> Result<Vec<(f64, f64)>, CasError> {
+    if num_points < 2 {
+        return Err(CasError::DomainError(
+            "num_points must be at least 2".into(),
+        ));
+    }
+    if t_min >= t_max {
+        return Err(CasError::DomainError(
+            "t_min must be less than t_max".into(),
+        ));
+    }
+
+    let step = (t_max - t_min) / (num_points - 1) as f64;
+    let mut points = Vec::with_capacity(num_points);
+    let mut env = Environment::new();
+
+    for i in 0..num_points {
+        let t = t_min + step * i as f64;
+        env.set(t_var, t);
+        let xv = evaluate(x_expr, &env);
+        let yv = evaluate(y_expr, &env);
+        match (xv, yv) {
+            (Ok(x), Ok(y)) if x.is_finite() && y.is_finite() => {
+                points.push((x, y));
+            }
+            _ => { /* skip */ }
+        }
+    }
+
+    Ok(points)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -236,5 +333,65 @@ mod tests {
         for &(x, y) in &pts {
             assert!((y - x * x).abs() < 1e-10);
         }
+    }
+
+    // ----- Polar tests -----
+
+    #[test]
+    fn test_polar_unit_circle() {
+        // r = 1 => should produce points on the unit circle
+        let expr = Expr::num(1.0);
+        let pts = generate_polar_points(
+            &expr, "t", 0.0, std::f64::consts::TAU, 100,
+        ).unwrap();
+        assert_eq!(pts.len(), 100);
+        for &(x, y) in &pts {
+            let r = (x * x + y * y).sqrt();
+            assert!((r - 1.0).abs() < 1e-10, "point ({x},{y}) not on unit circle: r={r}");
+        }
+    }
+
+    #[test]
+    fn test_polar_error_bad_range() {
+        let expr = Expr::num(1.0);
+        assert!(generate_polar_points(&expr, "t", 1.0, 0.0, 10).is_err());
+    }
+
+    // ----- Parametric tests -----
+
+    #[test]
+    fn test_parametric_circle() {
+        // x = cos(t), y = sin(t) => unit circle
+        let x_expr = Expr::func("cos", vec![Expr::var("t")]);
+        let y_expr = Expr::func("sin", vec![Expr::var("t")]);
+        let pts = generate_parametric_points(
+            &x_expr, &y_expr, "t", 0.0, std::f64::consts::TAU, 100,
+        ).unwrap();
+        assert_eq!(pts.len(), 100);
+        for &(x, y) in &pts {
+            let r = (x * x + y * y).sqrt();
+            assert!((r - 1.0).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_parametric_line() {
+        // x = t, y = 2*t
+        let x_expr = Expr::var("t");
+        let y_expr = Expr::mul(Expr::num(2.0), Expr::var("t"));
+        let pts = generate_parametric_points(
+            &x_expr, &y_expr, "t", 0.0, 1.0, 11,
+        ).unwrap();
+        assert_eq!(pts.len(), 11);
+        for &(x, y) in &pts {
+            assert!((y - 2.0 * x).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_parametric_error_bad_range() {
+        let x_expr = Expr::var("t");
+        let y_expr = Expr::var("t");
+        assert!(generate_parametric_points(&x_expr, &y_expr, "t", 1.0, 0.0, 10).is_err());
     }
 }
