@@ -5,8 +5,11 @@
 //! function plotting. CAS-dependent features are gated behind
 //! `#[cfg(feature = "cas")]`.
 
+use std::path::PathBuf;
+
 use egui::Ui;
 
+use crate::animation::{self, ColormapChoice};
 use crate::plotting;
 
 // ---------------------------------------------------------------------------
@@ -31,6 +34,18 @@ pub enum PdeMode {
     #[default]
     Wave,
     Heat,
+}
+
+/// PDE visualization mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PdeVizMode {
+    /// Standard 1D line plot at each time step.
+    #[default]
+    LinePlot,
+    /// Space-time heatmap (x-axis = space, y-axis = time).
+    Heatmap,
+    /// Contour lines over space-time grid.
+    Contour,
 }
 
 /// Fourier analysis sub-mode.
@@ -128,6 +143,20 @@ pub struct CalculatorPanel {
     /// Whether the PDE animation is playing.
     pub pde_playing: bool,
 
+    // -- PDE visualization --
+    /// PDE visualization mode (line plot, heatmap, contour).
+    pub pde_viz_mode: PdeVizMode,
+    /// Colormap for heatmap / contour rendering.
+    pub pde_colormap: ColormapChoice,
+    /// Texture handle for PDE heatmap (reused across frames).
+    pub pde_heatmap_texture: Option<egui::TextureHandle>,
+    /// Number of contour levels.
+    pub pde_contour_levels: usize,
+    /// Export directory path for animation frames.
+    pub pde_export_path: String,
+    /// Status message for export operations.
+    pub pde_export_status: Option<String>,
+
     // -- Fourier analysis --
     /// Fourier analysis sub-mode.
     pub fourier_mode: FourierMode,
@@ -194,6 +223,13 @@ impl Default for CalculatorPanel {
             pde_solution: None,
             pde_time_index: 0,
             pde_playing: false,
+
+            pde_viz_mode: PdeVizMode::LinePlot,
+            pde_colormap: ColormapChoice::Viridis,
+            pde_heatmap_texture: None,
+            pde_contour_levels: 10,
+            pde_export_path: String::new(),
+            pde_export_status: None,
 
             fourier_mode: FourierMode::Series,
             fourier_num_terms: 10,
@@ -923,27 +959,102 @@ impl CalculatorPanel {
             // Solution display with animation.
             if let Some(ref solution) = self.pde_solution {
                 let max_t = solution.data.len().saturating_sub(1);
+
+                // Visualization mode selector.
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if ui.button(if self.pde_playing { "Pause" } else { "Play" }).clicked() {
-                        self.pde_playing = !self.pde_playing;
-                    }
-                    ui.add(egui::Slider::new(&mut self.pde_time_index, 0..=max_t).text("time step"));
+                    ui.label("View:");
+                    ui.selectable_value(&mut self.pde_viz_mode, PdeVizMode::LinePlot, "Line Plot");
+                    ui.selectable_value(&mut self.pde_viz_mode, PdeVizMode::Heatmap, "Heatmap");
+                    ui.selectable_value(&mut self.pde_viz_mode, PdeVizMode::Contour, "Contour");
                 });
 
-                if max_t > 0 {
-                    let t_val = solution.t_grid[self.pde_time_index.min(max_t)];
-                    ui.label(format!("t = {t_val:.4}"));
+                // Colormap selector (for heatmap / contour).
+                if self.pde_viz_mode != PdeVizMode::LinePlot {
+                    ui.horizontal(|ui| {
+                        ui.label("Colormap:");
+                        ui.selectable_value(&mut self.pde_colormap, ColormapChoice::Viridis, "Viridis");
+                        ui.selectable_value(&mut self.pde_colormap, ColormapChoice::Inferno, "Inferno");
+                        ui.selectable_value(&mut self.pde_colormap, ColormapChoice::CoolWarm, "Cool-Warm");
+                    });
                 }
 
-                // Plot the current time-step spatial profile.
-                let idx = self.pde_time_index.min(max_t);
-                let profile: Vec<(f64, f64)> = solution.x_grid.iter().copied()
-                    .zip(solution.data[idx].iter().copied())
-                    .collect();
-                plotting::plot_function_2d(ui, &profile, "u(x, t)");
+                // Contour levels control.
+                if self.pde_viz_mode == PdeVizMode::Contour {
+                    ui.horizontal(|ui| {
+                        ui.label("Contour levels:");
+                        ui.add(egui::DragValue::new(&mut self.pde_contour_levels).speed(1.0).range(3..=50));
+                    });
+                }
 
-                // Animate.
-                if self.pde_playing {
+                // Time-step controls (line plot mode only).
+                if self.pde_viz_mode == PdeVizMode::LinePlot {
+                    ui.horizontal(|ui| {
+                        if ui.button(if self.pde_playing { "Pause" } else { "Play" }).clicked() {
+                            self.pde_playing = !self.pde_playing;
+                        }
+                        ui.add(egui::Slider::new(&mut self.pde_time_index, 0..=max_t).text("time step"));
+                    });
+
+                    if max_t > 0 {
+                        let t_val = solution.t_grid[self.pde_time_index.min(max_t)];
+                        ui.label(format!("t = {t_val:.4}"));
+                    }
+                }
+
+                // Render the selected visualization.
+                match self.pde_viz_mode {
+                    PdeVizMode::LinePlot => {
+                        let idx = self.pde_time_index.min(max_t);
+                        let profile: Vec<(f64, f64)> = solution.x_grid.iter().copied()
+                            .zip(solution.data[idx].iter().copied())
+                            .collect();
+                        plotting::plot_function_2d(ui, &profile, "u(x, t)");
+                    }
+                    PdeVizMode::Heatmap => {
+                        // Build space-time grid: rows = time steps, cols = spatial points.
+                        let x_range = (
+                            *solution.x_grid.first().unwrap_or(&0.0),
+                            *solution.x_grid.last().unwrap_or(&1.0),
+                        );
+                        let t_range = (
+                            *solution.t_grid.first().unwrap_or(&0.0),
+                            *solution.t_grid.last().unwrap_or(&1.0),
+                        );
+                        plotting::plot_heatmap(
+                            ui,
+                            &solution.data,
+                            x_range,
+                            t_range,
+                            "x",
+                            "t",
+                            "u(x, t) — Space-Time Heatmap",
+                            &mut self.pde_heatmap_texture,
+                            self.pde_colormap.function(),
+                        );
+                    }
+                    PdeVizMode::Contour => {
+                        let x_range = (
+                            *solution.x_grid.first().unwrap_or(&0.0),
+                            *solution.x_grid.last().unwrap_or(&1.0),
+                        );
+                        let t_range = (
+                            *solution.t_grid.first().unwrap_or(&0.0),
+                            *solution.t_grid.last().unwrap_or(&1.0),
+                        );
+                        plotting::plot_contours(
+                            ui,
+                            &solution.data,
+                            x_range,
+                            t_range,
+                            self.pde_contour_levels,
+                            "u(x, t) — Contour Plot",
+                        );
+                    }
+                }
+
+                // Animation line plot advance.
+                if self.pde_viz_mode == PdeVizMode::LinePlot && self.pde_playing {
                     if self.pde_time_index < max_t {
                         self.pde_time_index += 1;
                     } else {
@@ -951,8 +1062,114 @@ impl CalculatorPanel {
                     }
                     ui.ctx().request_repaint();
                 }
+
+                // Export controls.
+                ui.add_space(4.0);
+                ui.separator();
+                ui.label("Animation Export");
+                ui.horizontal(|ui| {
+                    ui.label("Output dir:");
+                    ui.text_edit_singleline(&mut self.pde_export_path);
+                });
+
+                ui.horizontal(|ui| {
+                    if ui.button("Export PNG Frames").clicked() {
+                        self.export_pde_png_frames();
+                    }
+                    if ui.button("Export GIF").clicked() {
+                        self.export_pde_gif();
+                    }
+                    if ui.button("Export Heatmap PNG").clicked() {
+                        self.export_pde_heatmap_png();
+                    }
+                });
+
+                if let Some(ref status) = self.pde_export_status {
+                    ui.label(status.as_str());
+                }
             }
         });
+    }
+
+    #[cfg(feature = "cas")]
+    fn export_pde_png_frames(&mut self) {
+        let Some(ref solution) = self.pde_solution else { return };
+        let dir = if self.pde_export_path.is_empty() {
+            std::env::temp_dir().join("simucad_pde_export")
+        } else {
+            PathBuf::from(&self.pde_export_path)
+        };
+
+        match animation::export_pde_frames_png(
+            &solution.data,
+            &dir,
+            "pde",
+            20,
+            self.pde_colormap.function(),
+        ) {
+            Ok(n) => {
+                self.pde_export_status = Some(format!("Exported {n} PNG frames to {}", dir.display()));
+            }
+            Err(e) => {
+                self.pde_export_status = Some(format!("PNG export error: {e}"));
+            }
+        }
+    }
+
+    #[cfg(feature = "cas")]
+    fn export_pde_gif(&mut self) {
+        let Some(ref solution) = self.pde_solution else { return };
+        let path = if self.pde_export_path.is_empty() {
+            std::env::temp_dir().join("simucad_pde.gif")
+        } else {
+            PathBuf::from(&self.pde_export_path).join("pde_animation.gif")
+        };
+
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        match animation::export_pde_gif(
+            &solution.data,
+            &path,
+            20,
+            5,
+            self.pde_colormap.function(),
+        ) {
+            Ok(n) => {
+                self.pde_export_status = Some(format!("Exported {n}-frame GIF to {}", path.display()));
+            }
+            Err(e) => {
+                self.pde_export_status = Some(format!("GIF export error: {e}"));
+            }
+        }
+    }
+
+    #[cfg(feature = "cas")]
+    fn export_pde_heatmap_png(&mut self) {
+        let Some(ref solution) = self.pde_solution else { return };
+        let path = if self.pde_export_path.is_empty() {
+            std::env::temp_dir().join("simucad_pde_heatmap.png")
+        } else {
+            PathBuf::from(&self.pde_export_path).join("pde_heatmap.png")
+        };
+
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        match animation::export_heatmap_png(
+            &solution.data,
+            &path,
+            self.pde_colormap.function(),
+        ) {
+            Ok(()) => {
+                self.pde_export_status = Some(format!("Exported heatmap to {}", path.display()));
+            }
+            Err(e) => {
+                self.pde_export_status = Some(format!("Heatmap export error: {e}"));
+            }
+        }
     }
 
     #[cfg(feature = "cas")]

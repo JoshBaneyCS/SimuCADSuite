@@ -7,6 +7,9 @@ use egui::Ui;
 use egui_plot::{Arrows, Line, Plot, PlotPoints, Points, Legend};
 use simucad_core::types::{Trajectory, TrajectoryPoint, Vec2};
 
+// Re-export color mapping utilities for use in other modules.
+pub use self::colormaps::{colormap_viridis, colormap_inferno, colormap_coolwarm};
+
 // ---------------------------------------------------------------------------
 // Trajectory plotting
 // ---------------------------------------------------------------------------
@@ -234,5 +237,360 @@ pub fn plot_vector_field(ui: &mut Ui, positions: &[Vec2], velocities: &[Vec2]) {
         .data_aspect(1.0)
         .show(ui, |plot_ui| {
             plot_ui.arrows(arrows);
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Color maps
+// ---------------------------------------------------------------------------
+
+pub mod colormaps {
+    use egui::Color32;
+
+    /// Viridis-like colormap: dark purple -> blue -> green -> yellow.
+    pub fn colormap_viridis(t: f64) -> Color32 {
+        let t = t.clamp(0.0, 1.0);
+        let r = (255.0 * (1.5 * t - 0.5).clamp(0.0, 1.0)) as u8;
+        let g = (255.0
+            * (2.0 * t - 0.5)
+                .clamp(0.0, 1.0)
+                .min(1.0 - (2.0 * t - 1.5).max(0.0))) as u8;
+        let b = (255.0 * (1.0 - 2.0 * t).clamp(0.0, 1.0)) as u8;
+        Color32::from_rgb(r, g, b)
+    }
+
+    /// Inferno-like colormap: black -> magenta -> orange -> yellow.
+    pub fn colormap_inferno(t: f64) -> Color32 {
+        let t = t.clamp(0.0, 1.0);
+        let r = (255.0 * (1.5 * t).clamp(0.0, 1.0)) as u8;
+        let g = (255.0 * (3.0 * t - 1.5).clamp(0.0, 1.0)) as u8;
+        let b = (255.0 * (1.0 - (3.0 * t - 0.5).abs()).clamp(0.0, 1.0)) as u8;
+        Color32::from_rgb(r, g, b)
+    }
+
+    /// Cool-to-warm (blue -> white -> red) diverging colormap.
+    pub fn colormap_coolwarm(t: f64) -> Color32 {
+        let t = t.clamp(0.0, 1.0);
+        if t < 0.5 {
+            let s = t * 2.0;
+            let r = (255.0 * s) as u8;
+            let g = (255.0 * s) as u8;
+            Color32::from_rgb(r, g, 255)
+        } else {
+            let s = (t - 0.5) * 2.0;
+            let g = (255.0 * (1.0 - s)) as u8;
+            let b = (255.0 * (1.0 - s)) as u8;
+            Color32::from_rgb(255, g, b)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 2D Heatmap (texture-based)
+// ---------------------------------------------------------------------------
+
+/// Render a 2D heatmap as an egui texture.
+///
+/// `data` is a row-major 2D grid `[rows][cols]`. The axes are labelled with
+/// `x_label` / `y_label`, and the value range is auto-normalized to the
+/// colormap.
+pub fn plot_heatmap(
+    ui: &mut Ui,
+    data: &[Vec<f64>],
+    x_range: (f64, f64),
+    y_range: (f64, f64),
+    x_label: &str,
+    y_label: &str,
+    title: &str,
+    texture_handle: &mut Option<egui::TextureHandle>,
+    colormap: fn(f64) -> egui::Color32,
+) {
+    if data.is_empty() || data[0].is_empty() {
+        ui.label("(no heatmap data)");
+        return;
+    }
+
+    let rows = data.len();
+    let cols = data[0].len();
+
+    // Auto-normalize.
+    let mut min_val = f64::MAX;
+    let mut max_val = f64::MIN;
+    for row in data {
+        for &v in row {
+            if v.is_finite() {
+                min_val = min_val.min(v);
+                max_val = max_val.max(v);
+            }
+        }
+    }
+    let range = (max_val - min_val).max(1e-12);
+
+    // Build texture (rebuild each frame for animation, or cache when static).
+    let mut pixels = vec![egui::Color32::BLACK; cols * rows];
+    for (row_idx, row) in data.iter().enumerate() {
+        for (col_idx, &val) in row.iter().enumerate() {
+            let t = if val.is_finite() {
+                (val - min_val) / range
+            } else {
+                0.0
+            };
+            // Flip y so row 0 (bottom) is at the bottom of the image.
+            let y = rows - 1 - row_idx;
+            pixels[y * cols + col_idx] = colormap(t);
+        }
+    }
+
+    let image = egui::ColorImage {
+        size: [cols, rows],
+        pixels,
+    };
+
+    let tex = ui.ctx().load_texture(
+        title,
+        image,
+        egui::TextureOptions::LINEAR,
+    );
+    *texture_handle = Some(tex);
+
+    ui.strong(title);
+
+    // Draw axis labels and the texture image.
+    ui.horizontal(|ui| {
+        ui.label(format!(
+            "{x_label}: [{:.2}, {:.2}]  {y_label}: [{:.2}, {:.2}]",
+            x_range.0, x_range.1, y_range.0, y_range.1
+        ));
+        ui.label(format!(
+            "  Range: [{:.4}, {:.4}]",
+            min_val, max_val
+        ));
+    });
+
+    if let &mut Some(ref tex) = texture_handle {
+        let available = ui.available_width().min(800.0);
+        let aspect = cols as f32 / rows as f32;
+        let height = (available / aspect).min(300.0);
+        ui.image(egui::load::SizedTexture::new(
+            tex.id(),
+            egui::vec2(available, height),
+        ));
+    }
+}
+
+/// Build a heatmap `ColorImage` for export (no UI needed).
+pub fn build_heatmap_image(
+    data: &[Vec<f64>],
+    colormap: fn(f64) -> egui::Color32,
+) -> Vec<u8> {
+    if data.is_empty() || data[0].is_empty() {
+        return Vec::new();
+    }
+
+    let rows = data.len();
+    let cols = data[0].len();
+
+    let mut min_val = f64::MAX;
+    let mut max_val = f64::MIN;
+    for row in data {
+        for &v in row {
+            if v.is_finite() {
+                min_val = min_val.min(v);
+                max_val = max_val.max(v);
+            }
+        }
+    }
+    let range = (max_val - min_val).max(1e-12);
+
+    let mut rgba = Vec::with_capacity(cols * rows * 4);
+    for row_idx in 0..rows {
+        let y = rows - 1 - row_idx;
+        for col_idx in 0..cols {
+            let val = data[y][col_idx];
+            let t = if val.is_finite() {
+                (val - min_val) / range
+            } else {
+                0.0
+            };
+            let c = colormap(t);
+            rgba.push(c.r());
+            rgba.push(c.g());
+            rgba.push(c.b());
+            rgba.push(255);
+        }
+    }
+    rgba
+}
+
+// ---------------------------------------------------------------------------
+// Contour plots (marching squares)
+// ---------------------------------------------------------------------------
+
+/// Extract contour lines at the given iso-values from a 2D grid.
+///
+/// Returns a list of polylines, where each polyline is a `Vec<(f64, f64)>`
+/// of (x, y) coordinates in the data's coordinate space.
+pub fn extract_contours(
+    data: &[Vec<f64>],
+    x_range: (f64, f64),
+    y_range: (f64, f64),
+    iso_values: &[f64],
+) -> Vec<(f64, Vec<(f64, f64)>)> {
+    if data.is_empty() || data[0].is_empty() {
+        return Vec::new();
+    }
+
+    let rows = data.len();
+    let cols = data[0].len();
+    let dx = (x_range.1 - x_range.0) / (cols - 1).max(1) as f64;
+    let dy = (y_range.1 - y_range.0) / (rows - 1).max(1) as f64;
+
+    let mut contours = Vec::new();
+
+    for &iso in iso_values {
+        let mut segments: Vec<((f64, f64), (f64, f64))> = Vec::new();
+
+        // Marching squares: process each cell.
+        for row in 0..rows - 1 {
+            for col in 0..cols - 1 {
+                let v00 = data[row][col];
+                let v10 = data[row][col + 1];
+                let v01 = data[row + 1][col];
+                let v11 = data[row + 1][col + 1];
+
+                // Cell corners in coordinate space.
+                let x0 = x_range.0 + col as f64 * dx;
+                let x1 = x0 + dx;
+                let y0 = y_range.0 + row as f64 * dy;
+                let y1 = y0 + dy;
+
+                // Classify corners: above (1) or below (0) the iso-value.
+                let case = ((v00 >= iso) as u8)
+                    | (((v10 >= iso) as u8) << 1)
+                    | (((v11 >= iso) as u8) << 2)
+                    | (((v01 >= iso) as u8) << 3);
+
+                if case == 0 || case == 15 {
+                    continue; // No contour through this cell.
+                }
+
+                // Linear interpolation along edges.
+                let lerp = |a: f64, b: f64| -> f64 {
+                    if (b - a).abs() < 1e-15 {
+                        0.5
+                    } else {
+                        (iso - a) / (b - a)
+                    }
+                };
+
+                // Edge midpoints (interpolated).
+                let bottom = (x0 + lerp(v00, v10) * dx, y0); // edge 0-1
+                let right = (x1, y0 + lerp(v10, v11) * dy);  // edge 1-2
+                let top = (x0 + lerp(v01, v11) * dx, y1);    // edge 3-2
+                let left = (x0, y0 + lerp(v00, v01) * dy);   // edge 0-3
+
+                // Map case to line segments.
+                let segs: &[((f64, f64), (f64, f64))] = match case {
+                    1 | 14 => &[(bottom, left)],
+                    2 | 13 => &[(bottom, right)],
+                    3 | 12 => &[(left, right)],
+                    4 | 11 => &[(right, top)],
+                    5 => &[(bottom, right), (left, top)], // saddle
+                    6 | 9 => &[(bottom, top)],
+                    7 | 8 => &[(left, top)],
+                    10 => &[(bottom, left), (right, top)], // saddle
+                    _ => &[],
+                };
+
+                for &seg in segs {
+                    segments.push(seg);
+                }
+            }
+        }
+
+        // Chain segments into polylines.
+        let points: Vec<(f64, f64)> = segments
+            .iter()
+            .flat_map(|&(a, b)| [a, b])
+            .collect();
+
+        if !points.is_empty() {
+            contours.push((iso, points));
+        }
+    }
+
+    contours
+}
+
+/// Plot contour lines on an egui_plot.
+pub fn plot_contours(
+    ui: &mut Ui,
+    data: &[Vec<f64>],
+    x_range: (f64, f64),
+    y_range: (f64, f64),
+    num_levels: usize,
+    title: &str,
+) {
+    if data.is_empty() || data[0].is_empty() {
+        ui.label("(no contour data)");
+        return;
+    }
+
+    // Auto-compute iso-values.
+    let mut min_val = f64::MAX;
+    let mut max_val = f64::MIN;
+    for row in data {
+        for &v in row {
+            if v.is_finite() {
+                min_val = min_val.min(v);
+                max_val = max_val.max(v);
+            }
+        }
+    }
+
+    let levels: Vec<f64> = (0..num_levels)
+        .map(|i| min_val + (max_val - min_val) * (i as f64 + 0.5) / num_levels as f64)
+        .collect();
+
+    let contours = extract_contours(data, x_range, y_range, &levels);
+
+    Plot::new(egui::Id::new(title).with("contour"))
+        .legend(Legend::default())
+        .x_axis_label("x")
+        .y_axis_label("t")
+        .height(300.0)
+        .show(ui, |plot_ui| {
+            let palette = [
+                egui::Color32::from_rgb(68, 1, 84),
+                egui::Color32::from_rgb(59, 82, 139),
+                egui::Color32::from_rgb(33, 145, 140),
+                egui::Color32::from_rgb(94, 201, 98),
+                egui::Color32::from_rgb(253, 231, 37),
+                egui::Color32::from_rgb(255, 180, 50),
+                egui::Color32::from_rgb(255, 100, 50),
+                egui::Color32::from_rgb(200, 50, 50),
+            ];
+
+            for (idx, (iso_val, pts)) in contours.iter().enumerate() {
+                // Draw segments as individual 2-point lines.
+                for chunk in pts.chunks(2) {
+                    if chunk.len() == 2 {
+                        let line = Line::new(PlotPoints::new(vec![
+                            [chunk[0].0, chunk[0].1],
+                            [chunk[1].0, chunk[1].1],
+                        ]))
+                        .color(palette[idx % palette.len()])
+                        .width(1.5);
+                        plot_ui.line(line);
+                    }
+                }
+
+                // One labeled invisible point for the legend.
+                let label_pt = Points::new(PlotPoints::new(vec![[f64::NAN, f64::NAN]]))
+                    .name(format!("{iso_val:.3}"))
+                    .color(palette[idx % palette.len()])
+                    .radius(0.0);
+                plot_ui.points(label_pt);
+            }
         });
 }

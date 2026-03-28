@@ -50,6 +50,10 @@ symphonia = { version = "0.5", features = ["mp3", "wav", "flac"] }
 csv = "1"
 rust_xlsxwriter = "0.80"
 
+# Image encoding / animation
+image = "0.25"
+gif = "0.13"
+
 # Testing / benchmarks
 criterion = { version = "0.5", features = ["html_reports"] }
 

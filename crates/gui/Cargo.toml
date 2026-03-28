@@ -19,6 +19,8 @@ egui_plot.workspace = true
 bytemuck.workspace = true
 tracing.workspace = true
 serde.workspace = true
+image.workspace = true
+gif.workspace = true
 
 [features]
 default = []

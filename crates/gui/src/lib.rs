@@ -1,3 +1,4 @@
+pub mod animation;
 pub mod app;
 #[cfg(feature = "audio")]
 pub mod audio_ui;
