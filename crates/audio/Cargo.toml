@@ -10,6 +10,7 @@ description = "Audio analysis: FFT/DFT pipeline, audio file decoding, spectral d
 simucad-core = { path = "../core" }
 rustfft.workspace = true
 symphonia.workspace = true
+cpal.workspace = true
 tracing.workspace = true
 serde.workspace = true
 

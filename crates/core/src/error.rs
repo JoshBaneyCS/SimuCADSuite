@@ -143,6 +143,12 @@ pub enum AudioError {
 
     #[error("IO error reading audio file: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Playback error: {0}")]
+    PlaybackError(String),
+
+    #[error("No audio output device available")]
+    NoOutputDevice,
 }
 
 // ---------------------------------------------------------------------------

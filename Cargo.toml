@@ -45,6 +45,7 @@ egui_plot = "0.30"
 # Audio / DSP
 rustfft = "6"
 symphonia = { version = "0.5", features = ["mp3", "wav", "flac"] }
+cpal = "0.15"
 
 # Data I/O
 csv = "1"
