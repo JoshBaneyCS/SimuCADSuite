@@ -166,7 +166,7 @@ impl ParticleSystem {
 
 /// Reflect a position back into the bounding box along each axis
 /// independently (elastic reflection).
-fn reflect_into_bounds(pos: &mut Vec3, bounds: &BoundingBox3) {
+pub fn reflect_into_bounds(pos: &mut Vec3, bounds: &BoundingBox3) {
     reflect_axis(&mut pos.x, bounds.min.x, bounds.max.x);
     reflect_axis(&mut pos.y, bounds.min.y, bounds.max.y);
     reflect_axis(&mut pos.z, bounds.min.z, bounds.max.z);

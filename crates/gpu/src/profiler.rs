@@ -22,9 +22,9 @@ impl GpuProfiler {
     /// Create a new profiler. If `enabled` is `false` **or** the device does
     /// not support timestamp queries, all methods become no-ops.
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, enabled: bool) -> Self {
-        let supports = device
-            .features()
-            .contains(wgpu::Features::TIMESTAMP_QUERY);
+        let features = device.features();
+        let supports = features.contains(wgpu::Features::TIMESTAMP_QUERY)
+            && features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS);
 
         if !enabled || !supports {
             if enabled && !supports {

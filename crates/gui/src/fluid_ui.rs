@@ -14,6 +14,11 @@ use simucad_mesh::io::{GmshLoader, MeshLoader};
 use simucad_mesh::types::{ElementType, Mesh};
 use simucad_physics::fluid::ParticleSystem;
 
+#[cfg(feature = "gpu")]
+use simucad_gpu::backend::{select_backend, ComputeBackend};
+#[cfg(feature = "gpu")]
+use simucad_physics::fluid::reflect_into_bounds;
+
 use crate::task::{TaskRunner, TaskStatus};
 use crate::viewport_3d::Viewport3D;
 
@@ -30,6 +35,8 @@ pub struct FluidResult {
     pub mesh_element_count: usize,
     pub steps_completed: usize,
     pub velocity_magnitude: f64,
+    /// Name of the compute backend used (e.g. "wgpu" or "cpu-rayon").
+    pub backend_name: String,
     /// Downsampled particle data for 3D visualization: (x, y, z, speed).
     pub particle_viz: Vec<(f64, f64, f64, f64)>,
     /// Mesh wireframe edges for 3D visualization: (start, end).
@@ -52,6 +59,8 @@ pub struct FluidPanel {
     pub particle_count: usize,
     /// Number of simulation timesteps.
     pub num_steps: usize,
+    /// Whether to use GPU acceleration (if available).
+    pub use_gpu: bool,
 
     /// Whether a mesh has been loaded.
     pub mesh_loaded: bool,
@@ -80,6 +89,7 @@ impl Default for FluidPanel {
             velocity_z: 0.0,
             particle_count: 5000,
             num_steps: 200,
+            use_gpu: cfg!(feature = "gpu"),
             mesh_loaded: false,
             mesh_info: None,
             task: TaskRunner::new(),
@@ -159,6 +169,11 @@ impl FluidPanel {
                         .range(1..=100_000),
                 );
                 ui.end_row();
+
+                ui.label("GPU acceleration:");
+                let gpu_available = cfg!(feature = "gpu");
+                ui.add_enabled(gpu_available, egui::Checkbox::new(&mut self.use_gpu, if gpu_available { "Enabled" } else { "Not available" }));
+                ui.end_row();
             });
 
         // Show mesh info if loaded.
@@ -217,8 +232,8 @@ impl FluidPanel {
                     match result {
                         Ok(res) => {
                             self.log_messages.push(format!(
-                                "Simulation complete: {} particles, {} steps",
-                                res.particle_count, res.steps_completed
+                                "Simulation complete: {} particles, {} steps [{}]",
+                                res.particle_count, res.steps_completed, res.backend_name
                             ));
                             self.last_result = Some(res);
                         }
@@ -284,6 +299,10 @@ impl FluidPanel {
 
                     ui.label("Flow velocity magnitude:");
                     ui.label(format!("{:.4} m/s", res.velocity_magnitude));
+                    ui.end_row();
+
+                    ui.label("Compute backend:");
+                    ui.label(&res.backend_name);
                     ui.end_row();
                 });
         }
@@ -354,12 +373,14 @@ impl FluidPanel {
         let velocity = Vec3::new(self.velocity_x, self.velocity_y, self.velocity_z);
         let particle_count = self.particle_count;
         let num_steps = self.num_steps;
+        let use_gpu = self.use_gpu;
 
         let progress = ProgressReporter::new(num_steps as u64);
         self.progress = Some(progress.clone());
 
         self.log_messages.push(format!(
-            "Starting simulation: particles={particle_count}, steps={num_steps}, v=({:.2},{:.2},{:.2})",
+            "Starting simulation: particles={particle_count}, steps={num_steps}, \
+             gpu={use_gpu}, v=({:.2},{:.2},{:.2})",
             velocity.x, velocity.y, velocity.z
         ));
 
@@ -372,7 +393,20 @@ impl FluidPanel {
             let mesh_element_count = mesh.element_count();
             let bounds = mesh.bounding_box();
 
-            progress.set_message("Initializing particles...".to_string());
+            // Select compute backend.
+            #[cfg(feature = "gpu")]
+            let backend: Box<dyn ComputeBackend> = if use_gpu {
+                select_backend()
+            } else {
+                Box::new(simucad_gpu::cpu_backend::CpuBackend::new())
+            };
+            #[cfg(feature = "gpu")]
+            let backend_name = backend.name().to_string();
+
+            #[cfg(not(feature = "gpu"))]
+            let backend_name = "cpu-rayon (built-in)".to_string();
+
+            progress.set_message(format!("Initializing particles ({backend_name})..."));
 
             // Create particle system within mesh bounding box.
             let mut system = ParticleSystem::initialize(bounds, particle_count);
@@ -385,11 +419,32 @@ impl FluidPanel {
                     return Err("Simulation cancelled by user".to_string());
                 }
 
-                system.advect(velocity, dt);
+                #[cfg(feature = "gpu")]
+                {
+                    // GPU/CPU backend: advect particles, then reflect into bounds.
+                    backend
+                        .advect_particles(&mut system.particles, velocity, dt)
+                        .map_err(|e| format!("Compute error: {e}"))?;
+
+                    // Set velocity on all particles and reflect into bounds.
+                    for p in &mut system.particles {
+                        p.velocity = velocity;
+                        reflect_into_bounds(&mut p.position, &bounds);
+                    }
+                }
+
+                #[cfg(not(feature = "gpu"))]
+                {
+                    system.advect(velocity, dt);
+                }
+
                 progress.set_progress((step + 1) as u64);
 
                 if step % 50 == 0 {
-                    progress.set_message(format!("Step {}/{num_steps}", step + 1));
+                    progress.set_message(format!(
+                        "[{backend_name}] Step {}/{num_steps}",
+                        step + 1
+                    ));
                 }
             }
 
@@ -420,6 +475,7 @@ impl FluidPanel {
                 mesh_element_count,
                 steps_completed: num_steps,
                 velocity_magnitude: vel_mag,
+                backend_name,
                 particle_viz,
                 mesh_edges,
             })
